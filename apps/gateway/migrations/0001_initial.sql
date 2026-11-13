@@ -25,8 +25,10 @@ CREATE TABLE IF NOT EXISTS audit (
 
 CREATE TABLE IF NOT EXISTS runners (
     id TEXT PRIMARY KEY,
-    token TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    token_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    rotated_at INTEGER,
+    revoked_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
