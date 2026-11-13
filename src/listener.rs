@@ -1,16 +1,16 @@
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::Json,
     routing::{get, post},
     Router,
 };
+use std::net::{IpAddr, SocketAddr};
 use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
@@ -46,7 +46,7 @@ pub async fn serve(config: Config) -> Result<()> {
     tracing::info!("Webhook listener on http://0.0.0.0:{} (secret={})", port, !state.config.webhook.secret.is_empty());
 
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
     Ok(())
 }
 
@@ -56,9 +56,14 @@ async fn health() -> Json<serde_json::Value> {
 
 async fn webhook(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: String,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // IP allowlist (GitHub hooks + localhost + Tailscale)
+    if !is_allowed_ip(addr.ip()) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "ip not allowed"})));
+    }
     // verify signature
     let secret = &state.config.webhook.secret;
     let sig_header = headers
@@ -211,6 +216,36 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
     match thread_id {
         Some(_) => format!("launched {}", key),
         None => format!("failed {}", key),
+    }
+}
+
+fn is_allowed_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            if v4.is_loopback() {
+                return true;
+            }
+            let o = v4.octets();
+            // Tailscale CGNAT range 100.64.0.0/10
+            if o[0] == 100 && (o[1] & 0xC0) == 64 {
+                return true;
+            }
+            // GitHub hook IP ranges
+            if o[0] == 192 && o[1] == 30 && o[2] >= 252 {
+                return true;
+            }
+            if o[0] == 185 && o[1] == 199 && o[2] >= 108 && o[2] <= 111 {
+                return true;
+            }
+            if o[0] == 140 && o[1] == 82 && o[2] >= 112 && o[2] <= 127 {
+                return true;
+            }
+            if o[0] == 143 && o[1] == 55 && o[2] >= 64 && o[2] <= 79 {
+                return true;
+            }
+            false
+        }
+        IpAddr::V6(v6) => v6.is_loopback(),
     }
 }
 
