@@ -30,15 +30,6 @@ pub struct Defaults {
     pub max_attempts: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoEntry {
-    pub name: String,
-    pub path: String,
-    pub github: String,
-    pub hook_id: Option<u64>,
-    pub enabled: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GatewayConfig {
     #[serde(default)]
@@ -50,6 +41,15 @@ pub struct GatewayConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoEntry {
+    pub name: String,
+    pub path: String,
+    pub github: String,
+    pub hook_id: Option<u64>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub version: u32,
     pub projects_base: String,
@@ -57,6 +57,7 @@ pub struct Config {
     pub repo: String,
     pub webhook: WebhookConfig,
     pub defaults: Defaults,
+    #[serde(skip, default)]
     pub repos: Vec<RepoEntry>,
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -80,7 +81,7 @@ impl Default for Config {
             },
             defaults: Defaults {
                 provider: "opencode".to_string(),
-                model: "opencode-go/beam-free".to_string(),
+                model: "opencode/beam-free".to_string(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
                 max_attempts: 3,
@@ -109,22 +110,33 @@ pub fn config_file() -> PathBuf {
 
 pub fn load_config() -> Result<Config> {
     let path = config_file();
-    if !path.exists() {
+    let mut cfg = if path.exists() {
+        let data = fs::read_to_string(&path)?;
+        serde_json::from_str::<Config>(&data)?
+    } else {
         let cfg = Config::default();
         save_config(&cfg)?;
-        return Ok(cfg);
-    }
-    let data = fs::read_to_string(&path)?;
-    let cfg: Config = serde_json::from_str(&data)?;
+        cfg
+    };
+    cfg.repos = crate::state::load_projects();
     Ok(cfg)
 }
 
 pub fn save_config(cfg: &Config) -> Result<()> {
-    let dir = config_dir();
-    fs::create_dir_all(&dir)?;
+    let path = config_file();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let data = serde_json::to_string_pretty(cfg)?;
-    fs::write(config_file(), data)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, &path)?;
+    sync_projects_to_db(&cfg.repos);
     Ok(())
+}
+
+fn sync_projects_to_db(repos: &[RepoEntry]) {
+    crate::state::sync_projects(repos);
 }
 
 pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
@@ -134,7 +146,6 @@ pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
         .find(|r| r.name == name || r.github == name)
 }
 
-#[allow(dead_code)]
 pub fn get_repo_mut<'a>(config: &'a mut Config, name: &str) -> Option<&'a mut RepoEntry> {
     config
         .repos
