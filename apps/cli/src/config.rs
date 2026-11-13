@@ -40,6 +40,69 @@ pub struct GatewayConfig {
     pub token: String,
 }
 
+/// Standalone (Gateway-free) mention polling. Disabled until usernames are set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MentionsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// GitHub logins (without `@`) that act as trigger identities. Self-mentions work.
+    #[serde(default)]
+    pub usernames: Vec<String>,
+    /// Explicit command required after the mention, e.g. `@alice factory fix it`.
+    /// Empty means any mention triggers.
+    #[serde(default = "default_mention_command")]
+    pub command: String,
+    /// Extra authors allowed to trigger, beyond the usernames above. Others need
+    /// write permission on the repository (checked through `gh`).
+    #[serde(default)]
+    pub allowed_authors: Vec<String>,
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_secs: u64,
+    /// How far back the first poll looks before a cursor exists.
+    #[serde(default = "default_initial_lookback")]
+    pub initial_lookback_secs: u64,
+    #[serde(default = "default_daily_quota")]
+    pub daily_quota: u32,
+    /// Comment the outcome back on the issue/PR.
+    #[serde(default = "default_true")]
+    pub report: bool,
+}
+
+fn default_mention_command() -> String {
+    "factory".to_string()
+}
+
+fn default_poll_interval() -> u64 {
+    60
+}
+
+fn default_initial_lookback() -> u64 {
+    300
+}
+
+fn default_daily_quota() -> u32 {
+    20
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for MentionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            usernames: Vec::new(),
+            command: default_mention_command(),
+            allowed_authors: Vec::new(),
+            poll_interval_secs: default_poll_interval(),
+            initial_lookback_secs: default_initial_lookback(),
+            daily_quota: default_daily_quota(),
+            report: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoEntry {
     pub name: String,
@@ -61,6 +124,8 @@ pub struct Config {
     pub repos: Vec<RepoEntry>,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub mentions: MentionsConfig,
 }
 
 impl Default for Config {
@@ -88,6 +153,7 @@ impl Default for Config {
             },
             repos: Vec::new(),
             gateway: GatewayConfig::default(),
+            mentions: MentionsConfig::default(),
         }
     }
 }
@@ -151,4 +217,25 @@ pub fn get_repo_mut<'a>(config: &'a mut Config, name: &str) -> Option<&'a mut Re
         .repos
         .iter_mut()
         .find(|r| r.name == name || r.github == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_without_mentions_uses_defaults() {
+        let json = r#"{
+            "version": 1,
+            "projects_base": "/tmp/projects",
+            "repo": "",
+            "webhook": {"port": 8787, "secret": "", "funnel_url": ""},
+            "defaults": {"provider": "opencode", "model": "m", "base_branch": "main", "label": "status/ready"}
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert!(!cfg.mentions.enabled);
+        assert_eq!(cfg.mentions.command, "factory");
+        assert_eq!(cfg.mentions.poll_interval_secs, 60);
+        assert!(cfg.mentions.report);
+    }
 }

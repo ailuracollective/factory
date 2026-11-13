@@ -44,6 +44,7 @@ with the secret from `factory init`.
 | `factory test <repo> <issue#> [--prompt "..."]` | Manually launch an agent for an issue (optional custom prompt) |
 | `factory run <repo> --prompt "..."` | Launch an agent with a custom prompt (no issue) |
 | `factory listen [--port N]` | Run webhook listener in foreground |
+| `factory mentions [--once] [--interval N]` | Poll GitHub for configured mentions and dispatch work |
 
 ## How it works
 
@@ -51,6 +52,10 @@ with the secret from `factory init`.
 2. The factory verifies the HMAC signature and filters by `status/ready` (Ailura Collective standard).
 3. For each qualifying issue, it launches a T3 Code agent in an isolated git worktree/branch.
 4. The agent implements, tests, and opens a pull request (does not merge).
+
+Alternatively, `factory mentions` polls allowlisted repositories for mentions of
+your configured GitHub username and dispatches authorized requests without the
+Gateway or GitHub notifications. See [docs/mentions.md](docs/mentions.md).
 
 ## Requirements
 
@@ -61,7 +66,8 @@ with the secret from `factory init`.
 
 ## Configuration
 
-Config lives at `~/.config/factory/config.json`. See `factory init`.
+Config lives at `~/.config/ailuracollective/factory/config.json`. See `factory init`.
+Mention triggers are documented in [docs/mentions.md](docs/mentions.md).
 
 ## License
 

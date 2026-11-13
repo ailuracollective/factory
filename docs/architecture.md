@@ -9,8 +9,12 @@
 ## Components
 
 ### Factory CLI (`apps/cli`)
-Local daemon + manual commands. Two modes:
+Local daemon + manual commands. Three modes:
 - Local mode (existing): webhooks direct to machine, T3 agent launch.
+- Standalone mentions: `factory mentions` polls GitHub issues/comments for
+  configured mentions and dispatches authorized work. Ingestion is behind an
+  `EventSource` trait (`apps/cli/src/mentions.rs`), so a Gateway-backed source can
+  replace the poller without changing parsing, authorization or dispatch.
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.
 
 ### Factory Gateway (`apps/gateway`)
