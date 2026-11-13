@@ -67,6 +67,7 @@ impl Default for Config {
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("ailuracollective")
         .join("factory")
 }
 

@@ -13,6 +13,7 @@ pub struct State {
 pub fn state_file() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("ailuracollective")
         .join("factory")
         .join("state.json")
 }
