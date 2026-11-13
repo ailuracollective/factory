@@ -1,13 +1,5 @@
-.venv/
-__pycache__/
-*.pyc
-.issue_factory_state.json
+/target
+*.service
 .env
-dist/
-build/
-*.egg-info/
-.ruff_cache/
-.pytest_cache/
-.mypy_cache/
-node_modules/
-factory.service
+.issue_factory_state.json
+state.json

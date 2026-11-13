@@ -1,14 +1,14 @@
 # AI Factory
 
 A console application that listens to GitHub issues and launches [T3 Code](https://t3.codes) agents to resolve them.
-Runs locally on your machine — no cloud hosting required.
+Written in Rust. Runs locally on your machine — no cloud hosting required.
 
-## Installation
+## Build
 
 ```bash
-git clone https://github.com/ailuracollective/factory.git
-cd factory
-uv sync
+cargo build --release
+# binary: target/release/factory
+cp target/release/factory ~/.local/bin/factory
 ```
 
 ## Quick start
@@ -16,8 +16,7 @@ uv sync
 ```bash
 factory init                    # create config, generate secret
 factory doctor                  # verify dependencies
-factory repo add ailuracollective/test_bots
-factory secret rotate           # (if needed) update secret everywhere
+factory repo add /path/to/repo  # register a repo
 tailscale funnel --bg 8787      # expose webhook
 factory start                   # start daemon
 ```
@@ -29,8 +28,8 @@ with the secret from `factory init`.
 
 | Command | Description |
 |---|---|
-| `factory init [--force]` | Initialize config |
-| `factory repo add <path-or-name>` | Register an existing repo (labels, T3, webhook) |
+| `factory init [--force]` | Initialize factory config |
+| `factory repo add <path>` | Register an existing repo (labels, T3, webhook) |
 | `factory repo list` | List repos |
 | `factory repo remove <name>` | Unregister a repo |
 | `factory repo sync <name>` | Re-apply labels from standards |
@@ -42,6 +41,7 @@ with the secret from `factory init`.
 | `factory logs [-f] [-n N]` | Show/follow daemon logs |
 | `factory doctor` | Run diagnostics |
 | `factory test <repo> <issue#>` | Manually launch an agent for an issue |
+| `factory listen [--port N]` | Run webhook listener in foreground |
 
 ## How it works
 
@@ -52,7 +52,7 @@ with the secret from `factory init`.
 
 ## Requirements
 
-- Python 3.12+
+- Rust toolchain (rustup)
 - `gh` CLI authenticated
 - T3 Code service running
 - Tailscale Funnel (or any public tunnel)
@@ -60,12 +60,6 @@ with the secret from `factory init`.
 ## Configuration
 
 Config lives at `~/.config/factory/config.json`. See `factory init`.
-
-## Tests
-
-```bash
-uv run pytest -q
-```
 
 ## License
 

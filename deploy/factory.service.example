@@ -11,10 +11,8 @@ Environment=ISSUE_FACTORY_WEBHOOK_SECRET=YOUR_SECRET_HERE
 Environment=ISSUE_FACTORY_WEBHOOK_PORT=8787
 Environment=ISSUE_FACTORY_PROVIDER=opencode
 Environment=ISSUE_FACTORY_MODEL=opencode-go/beam-free
-Environment=ISSUE_FACTORY_T3=%h/.local/bin/t3
-Environment=ISSUE_FACTORY_GH=%h/.local/bin/gh
-Environment=PATH=/opt/az/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/projects/ailuracollective/factory/.venv/bin/python -m factory.listener --port 8787
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/factory listen --port 8787
 Restart=on-failure
 RestartSec=10
 
