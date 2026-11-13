@@ -48,14 +48,17 @@ pub struct MentionsConfig {
     /// GitHub logins (without `@`) that act as trigger identities. Self-mentions work.
     #[serde(default)]
     pub usernames: Vec<String>,
-    /// Explicit command required after the mention, e.g. `@alice factory fix it`.
-    /// Empty means any mention triggers.
+    /// Optional trigger word between the mention and the command, e.g.
+    /// `@alice factory plan`. Empty means the command directly follows the mention.
     #[serde(default = "default_mention_command")]
     pub command: String,
     /// Extra authors allowed to trigger, beyond the usernames above. Others need
     /// write permission on the repository (checked through `gh`).
     #[serde(default)]
     pub allowed_authors: Vec<String>,
+    /// Authors treated as Factory administrators (may cancel any execution).
+    #[serde(default)]
+    pub admin_users: Vec<String>,
     #[serde(default = "default_poll_interval")]
     pub poll_interval_secs: u64,
     /// How far back the first poll looks before a cursor exists.
@@ -63,9 +66,24 @@ pub struct MentionsConfig {
     pub initial_lookback_secs: u64,
     #[serde(default = "default_daily_quota")]
     pub daily_quota: u32,
+    /// Commands allowed for the `test` command, run in the project directory
+    /// without a shell. Empty means `test` is rejected (fail closed).
+    #[serde(default)]
+    pub test_allowlist: Vec<String>,
+    /// Queued/running executions older than this are failed or cancelled on the
+    /// next poll. `0` disables timeout recovery.
+    #[serde(default = "default_execution_timeout")]
+    pub execution_timeout_secs: u64,
+    /// Explicit mapping of repository roles to Factory capabilities.
+    #[serde(default)]
+    pub command_policy: crate::commands::CommandPolicy,
     /// Comment the outcome back on the issue/PR.
     #[serde(default = "default_true")]
     pub report: bool,
+}
+
+fn default_execution_timeout() -> u64 {
+    3600
 }
 
 fn default_mention_command() -> String {
@@ -95,9 +113,13 @@ impl Default for MentionsConfig {
             usernames: Vec::new(),
             command: default_mention_command(),
             allowed_authors: Vec::new(),
+            admin_users: Vec::new(),
             poll_interval_secs: default_poll_interval(),
             initial_lookback_secs: default_initial_lookback(),
             daily_quota: default_daily_quota(),
+            test_allowlist: Vec::new(),
+            execution_timeout_secs: default_execution_timeout(),
+            command_policy: crate::commands::CommandPolicy::default(),
             report: true,
         }
     }
@@ -236,6 +258,16 @@ mod tests {
         assert!(!cfg.mentions.enabled);
         assert_eq!(cfg.mentions.command, "factory");
         assert_eq!(cfg.mentions.poll_interval_secs, 60);
+        assert_eq!(cfg.mentions.execution_timeout_secs, 3600);
+        assert!(cfg.mentions.test_allowlist.is_empty());
+        assert!(cfg.mentions.command_policy.allows(
+            crate::commands::Role::Owner,
+            crate::commands::Capability::ExecutionsCancel
+        ));
+        assert!(!cfg.mentions.command_policy.allows(
+            crate::commands::Role::Write,
+            crate::commands::Capability::ExecutionsCancel
+        ));
         assert!(cfg.mentions.report);
     }
 }

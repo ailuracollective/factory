@@ -189,6 +189,36 @@ async fn connect(path: &PathBuf) -> Result<DatabaseConnection> {
     )";
     db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
         .await?;
+    let sql = "CREATE TABLE IF NOT EXISTS executions (
+        id TEXT PRIMARY KEY NOT NULL,
+        event_key TEXT NOT NULL UNIQUE,
+        repo TEXT NOT NULL,
+        target TEXT NOT NULL,
+        context TEXT NOT NULL,
+        command TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        role TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        state TEXT NOT NULL,
+        detail TEXT,
+        thread_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )";
+    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
+    let sql = "CREATE TABLE IF NOT EXISTS execution_transitions (
+        row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        detail TEXT,
+        at INTEGER NOT NULL
+    )";
+    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
+    let sql = "CREATE INDEX IF NOT EXISTS idx_executions_target ON executions (repo, target)";
+    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
     Ok(db)
 }
 
@@ -452,11 +482,190 @@ pub fn record_mention_event(key: &str, status: &str, detail: &str) -> Result<()>
     ))
 }
 
-async fn count_mention_launches_db(path: PathBuf, since: i64) -> Result<usize> {
+fn row_to_execution(row: &sea_orm::QueryResult) -> Option<crate::commands::Execution> {
+    use crate::commands::{CommandKind, Context, Execution, ExecutionState, Role};
+    let state: String = row.try_get("", "state").ok()?;
+    let command: String = row.try_get("", "command").ok()?;
+    let context: String = row.try_get("", "context").ok()?;
+    let role: String = row.try_get("", "role").ok()?;
+    Some(Execution {
+        id: row.try_get("", "id").ok()?,
+        event_key: row.try_get("", "event_key").ok()?,
+        repo: row.try_get("", "repo").ok()?,
+        target: row.try_get("", "target").ok()?,
+        context: Context::from_str(&context)?,
+        command: CommandKind::from_str(&command)?,
+        actor: row.try_get("", "actor").ok()?,
+        role: Role::from_str(&role)?,
+        agent: row.try_get("", "agent").ok()?,
+        state: ExecutionState::from_str(&state)?,
+        detail: row.try_get("", "detail").ok(),
+        thread_id: row.try_get("", "thread_id").ok(),
+        created_at: row.try_get::<i64>("", "created_at").unwrap_or(0) as u64,
+        updated_at: row.try_get::<i64>("", "updated_at").unwrap_or(0) as u64,
+    })
+}
+
+async fn create_execution_db(path: PathBuf, execution: crate::commands::Execution) -> Result<bool> {
+    let db = connect(&path).await?;
+    let transition = execution.clone();
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT OR IGNORE INTO executions
+         (id, event_key, repo, target, context, command, actor, role, agent, state, detail, thread_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            execution.id.clone().into(),
+            execution.event_key.into(),
+            execution.repo.into(),
+            execution.target.into(),
+            execution.context.as_str().into(),
+            execution.command.name().into(),
+            execution.actor.into(),
+            execution.role.as_str().into(),
+            execution.agent.into(),
+            execution.state.as_str().into(),
+            execution.detail.clone().into(),
+            execution.thread_id.clone().into(),
+            (execution.created_at as i64).into(),
+            (execution.updated_at as i64).into(),
+        ],
+    );
+    let result = db.execute_raw(stmt).await?;
+    if result.rows_affected() == 0 {
+        return Ok(false);
+    }
+    insert_execution_transition(&db, &transition).await?;
+    Ok(true)
+}
+
+pub fn create_execution(execution: &crate::commands::Execution) -> Result<bool> {
+    let path = state_file();
+    run_async(create_execution_db(path, execution.clone()))
+}
+
+async fn insert_execution_transition(
+    db: &DatabaseConnection,
+    execution: &crate::commands::Execution,
+) -> Result<()> {
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT INTO execution_transitions (execution_id, state, detail, at) VALUES (?, ?, ?, ?)",
+        [
+            execution.id.clone().into(),
+            execution.state.as_str().into(),
+            execution.detail.clone().into(),
+            (execution.updated_at as i64).into(),
+        ],
+    );
+    db.execute_raw(stmt).await?;
+    Ok(())
+}
+
+async fn execution_get_db(path: PathBuf, id: String) -> Option<crate::commands::Execution> {
+    let db = connect(&path).await.ok()?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT * FROM executions WHERE id = ?",
+        [id.into()],
+    );
+    db.query_one_raw(stmt)
+        .await
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(row_to_execution)
+}
+
+pub fn execution_get(id: &str) -> Option<crate::commands::Execution> {
+    let path = state_file();
+    run_async(execution_get_db(path, id.to_string()))
+}
+
+async fn save_execution_db(path: PathBuf, execution: crate::commands::Execution) -> Result<()> {
     let db = connect(&path).await?;
     let stmt = Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT COUNT(*) AS c FROM mention_events WHERE status IN ('accepted', 'completed') AND created_at >= ?",
+        "UPDATE executions SET state = ?, detail = ?, thread_id = ?, updated_at = ? WHERE id = ?",
+        [
+            execution.state.as_str().into(),
+            execution.detail.clone().into(),
+            execution.thread_id.clone().into(),
+            (execution.updated_at as i64).into(),
+            execution.id.clone().into(),
+        ],
+    );
+    db.execute_raw(stmt).await?;
+    insert_execution_transition(&db, &execution).await?;
+    Ok(())
+}
+
+pub fn save_execution(execution: &crate::commands::Execution) -> Result<()> {
+    let path = state_file();
+    run_async(save_execution_db(path, execution.clone()))
+}
+
+async fn executions_for_target_db(
+    path: PathBuf,
+    repo: String,
+    target: String,
+) -> Vec<crate::commands::Execution> {
+    let db = match connect(&path).await {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT * FROM executions WHERE repo = ? AND target = ? ORDER BY created_at DESC LIMIT 50",
+        [repo.into(), target.into()],
+    );
+    db.query_all_raw(stmt)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter_map(row_to_execution)
+        .collect()
+}
+
+pub fn executions_for_target(repo: &str, target: &str) -> Vec<crate::commands::Execution> {
+    let path = state_file();
+    run_async(executions_for_target_db(
+        path,
+        repo.to_string(),
+        target.to_string(),
+    ))
+}
+
+async fn active_executions_db(path: PathBuf) -> Vec<crate::commands::Execution> {
+    let db = match connect(&path).await {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
+    let stmt = Statement::from_string(
+        DbBackend::Sqlite,
+        "SELECT * FROM executions WHERE state IN ('queued', 'running', 'cancelling') ORDER BY updated_at ASC",
+    );
+    db.query_all_raw(stmt)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter_map(row_to_execution)
+        .collect()
+}
+
+pub fn active_executions() -> Vec<crate::commands::Execution> {
+    let path = state_file();
+    run_async(active_executions_db(path))
+}
+
+async fn count_task_executions_db(path: PathBuf, since: i64) -> Result<usize> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT COUNT(*) AS c FROM executions
+         WHERE command IN ('plan', 'implement', 'review', 'test')
+           AND state NOT IN ('received', 'validating', 'rejected')
+           AND created_at >= ?",
         [since.into()],
     );
     let row = db.query_one_raw(stmt).await?;
@@ -464,9 +673,38 @@ async fn count_mention_launches_db(path: PathBuf, since: i64) -> Result<usize> {
     Ok(count.max(0) as usize)
 }
 
-pub fn count_mention_launches_since(since: u64) -> usize {
+pub fn count_task_executions_since(since: u64) -> usize {
     let path = state_file();
-    run_async(count_mention_launches_db(path, since as i64)).unwrap_or(0)
+    run_async(count_task_executions_db(path, since as i64)).unwrap_or(0)
+}
+
+#[cfg(test)]
+async fn execution_transitions_db(path: PathBuf, id: String) -> Vec<(String, u64)> {
+    let db = match connect(&path).await {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT state, at FROM execution_transitions WHERE execution_id = ? ORDER BY row_id ASC",
+        [id.into()],
+    );
+    db.query_all_raw(stmt)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|row| {
+            let state: String = row.try_get("", "state").ok()?;
+            let at: i64 = row.try_get("", "at").ok()?;
+            Some((state, at as u64))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub fn execution_transitions(id: &str) -> Vec<(String, u64)> {
+    let path = state_file();
+    run_async(execution_transitions_db(path, id.to_string()))
 }
 
 #[cfg(test)]

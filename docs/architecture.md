@@ -14,7 +14,9 @@ Local daemon + manual commands. Three modes:
 - Standalone mentions: `factory mentions` polls GitHub issues/comments for
   configured mentions and dispatches authorized work. Ingestion is behind an
   `EventSource` trait (`apps/cli/src/mentions.rs`), so a Gateway-backed source can
-  replace the poller without changing parsing, authorization or dispatch.
+  replace the poller without changing parsing, authorization or dispatch. The
+  mention command catalog, capability policy and execution state machine live in
+  `apps/cli/src/commands.rs` (see `docs/commands.md`).
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.
 
 ### Factory Gateway (`apps/gateway`)

@@ -5,6 +5,10 @@ locally. This works without the Gateway and without GitHub notifications, so a
 maintainer can trigger work by mentioning their own username (which GitHub does
 not notify).
 
+The supported commands (`help`, `status`, `plan`, `implement`, `review`, `test`,
+`cancel`), their options, contexts, capabilities, permissions and execution
+states are documented in [commands.md](commands.md).
+
 ## Configuration
 
 Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
@@ -29,23 +33,28 @@ Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
 |---|---|
 | `enabled` | Turn mention polling on. Existing configs default to `false`. |
 | `usernames` | Trigger identities, without `@`. Case-insensitive. Your own login is enough for self-mentions. |
-| `command` | Explicit command required after the mention. Empty means any mention triggers. |
+| `command` | Optional trigger word between the mention and the command. Empty means the command directly follows the mention. |
 | `allowed_authors` | Extra logins allowed to trigger. Others are checked for repository write permission. |
+| `admin_users` | Logins treated as administrators (may cancel any execution). |
+| `test_allowlist` | Programs the `test` command may run. Empty disables `test`. |
+| `execution_timeout_secs` | Stale queued/running executions are recovered after this timeout. |
+| `command_policy` | Explicit role-to-capability mapping. See [commands.md](commands.md). |
 | `poll_interval_secs` | Delay between polls. Minimum 5 seconds. |
 | `initial_lookback_secs` | How far back the first poll looks before a cursor exists. |
 | `daily_quota` | Maximum launches per rolling 24 hours. `0` disables the quota. |
 | `report` | Comment the outcome back on the issue/PR. |
 
-Invocation syntax (with the default command):
+Invocation syntax (with the default command word):
 
 ```
 @your-github-login factory implement this
+@your-github-login plan focus on rollback
 ```
 
 Ordinary mentions such as `@your-github-login can you look at this later?` do
-**not** launch work because the command token is missing. The text after the
-command is untrusted GitHub content and is passed to the agent as guidance, not
-executed as a shell command.
+**not** launch work because the command token is missing. `fix` remains an alias
+for `implement`. The text after the command is untrusted GitHub content and is
+passed to the agent as guidance, not executed as a shell command.
 
 ## Usage
 
@@ -72,15 +81,16 @@ An event is accepted only when all of these hold:
 1. The repository is registered and enabled (`factory repo add`, `factory repo
    list`). Repositories outside the allowlist are rejected.
 2. The event author is authorized: they are a configured trigger username, an
-   `allowed_authors` entry, or have `admin`, `maintain` or `write` permission on
-   the repository as reported by `gh api .../collaborators/{user}/permission`.
-   Permission lookups fail closed.
-3. The only supported operation is `fix` (launch an agent to resolve the issue
-   or pull request). Text that does not match the invocation syntax is ignored;
-   rejected requests are audited.
+   `allowed_authors` entry, an `admin_users` entry, or have `admin`, `maintain`
+   or `write` permission on the repository as reported by `gh api
+   .../collaborators/{user}/permission`. Permission lookups fail closed.
+3. The author's resolved role has the command's capability. Defaults: `write`
+   may use every command except `cancel`; `maintain` and `admin` may also use
+   `cancel`; the trigger identity and `allowed_authors` may use everything.
+   Override with `mentions.command_policy`.
 
-Being mentioned is not permission to execute: the author is checked, not the
-mentioned account.
+Unknown commands, unsupported options, wrong contexts and unauthorized authors
+are rejected. Rejections for known commands are audited and reported.
 
 ## Polling, deduplication and restarts
 
