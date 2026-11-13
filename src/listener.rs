@@ -17,23 +17,39 @@ use tokio::net::TcpListener;
 
 use crate::agent::launch_agent;
 use crate::config::Config;
-use crate::state::{load_state, save_state};
+use crate::state::{load_state, save_state, IssueState, IssueStatus};
 
 type HmacSha256 = Hmac<Sha256>;
+
+fn max_attempts(config: &Config) -> u32 {
+    if let Ok(s) = std::env::var("ISSUE_FACTORY_MAX_ATTEMPTS") {
+        if let Ok(n) = s.parse::<u32>() {
+            if n > 0 {
+                return n;
+            }
+        }
+    }
+    if config.defaults.max_attempts > 0 {
+        config.defaults.max_attempts
+    } else {
+        3
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
-    pub processed: Arc<Mutex<Vec<String>>>,
-    pub threads: Arc<Mutex<HashMap<String, String>>>,
+    pub issues: Arc<Mutex<HashMap<String, IssueState>>>,
 }
 
 pub async fn serve(config: Config) -> Result<()> {
-    let (processed, threads) = load_state();
+    let issues = load_state();
+    // Persist reconciled state (interrupted runs -> failed) for determinism.
+    let _ = save_state(&issues);
+
     let state = AppState {
         config: Arc::new(config),
-        processed: Arc::new(Mutex::new(processed)),
-        threads: Arc::new(Mutex::new(threads)),
+        issues: Arc::new(Mutex::new(issues)),
     };
 
     let port = state.config.webhook.port;
@@ -75,14 +91,12 @@ async fn webhook(
     headers: HeaderMap,
     body: String,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // IP allowlist (GitHub hooks + localhost + Tailscale)
     if !is_allowed_ip(addr.ip()) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"error": "ip not allowed"})),
         );
     }
-    // verify signature
     let secret = &state.config.webhook.secret;
     let sig_header = headers
         .get("x-hub-signature-256")
@@ -122,7 +136,6 @@ async fn webhook(
         );
     }
 
-    // spawn background task
     let state_clone = state.clone();
     tokio::spawn(async move {
         let status = handle_payload(state_clone, payload).await;
@@ -150,7 +163,6 @@ fn verify_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
     mac.update(body);
     let result = mac.finalize().into_bytes();
     let expected = hex::decode(expected_hex).unwrap_or_default();
-    // constant-time compare
     if expected.len() != result.len() {
         return false;
     }
@@ -195,33 +207,47 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
     } else {
         repo
     };
-    // single-repo filter
     if !state.config.repo.is_empty() && repo != state.config.repo {
         return "ignored: repo not configured".to_string();
     }
 
     let key = format!("{}#{}", repo, number);
 
-    // check + reserve processed (before launching to avoid races)
+    // Atomic reserve: decide whether this delivery may launch.
     {
-        let mut proc = state.processed.lock().unwrap();
-        if proc.contains(&key) {
-            return format!("ignored: already processed {}", key);
+        let mut issues = state.issues.lock().unwrap();
+        if let Some(rec) = issues.get(&key) {
+            match rec.status {
+                IssueStatus::Completed => {
+                    return format!("ignored: already completed {}", key);
+                }
+                IssueStatus::Running => {
+                    return format!("ignored: already running {}", key);
+                }
+                IssueStatus::Failed if rec.attempts >= max_attempts(&state.config) => {
+                    return format!("ignored: retries exhausted {}", key);
+                }
+                _ => {}
+            }
         }
-        proc.push(key.clone());
+        let mut rec = issues.get(&key).cloned().unwrap_or_default();
+        rec.status = IssueStatus::Running;
+        rec.attempts = rec.attempts.saturating_add(1);
+        rec.last_error = None;
+        rec.updated_at = crate::state::now();
+        issues.insert(key.clone(), rec);
+        let snapshot = issues.clone();
+        drop(issues);
+        let _ = save_state(&snapshot);
     }
-    // save state (reserved)
-    {
-        let p = state.processed.lock().unwrap();
-        let t = state.threads.lock().unwrap();
-        let _ = save_state(&p, &t);
-    }
+
+    tracing::info!(issue = %key, "reserved issue for launch");
 
     // resolve project path
     let projects_base = PathBuf::from(&state.config.projects_base);
     let mut project: Option<PathBuf> = None;
     for r in &state.config.repos {
-        if r.github == repo || r.name == repo.split('/').last().unwrap_or("") {
+        if r.github == repo || r.name == repo.rsplit('/').next().unwrap_or("") {
             if !r.path.is_empty() {
                 project = Some(PathBuf::from(&r.path));
             }
@@ -229,27 +255,47 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
         }
     }
     if project.is_none() {
-        project = Some(projects_base.join(repo.split('/').last().unwrap_or("")));
+        project = Some(projects_base.join(repo.rsplit('/').next().unwrap_or("")));
     }
     let project = project.unwrap();
     if !project.exists() {
-        // un-reserve
-        let mut proc = state.processed.lock().unwrap();
-        proc.retain(|k| k != &key);
-        let p = state.processed.lock().unwrap();
-        let t = state.threads.lock().unwrap();
-        let _ = save_state(&p, &t);
+        // transition to failed (retryable) state
+        let mut issues = state.issues.lock().unwrap();
+        if let Some(rec) = issues.get_mut(&key) {
+            rec.status = IssueStatus::Failed;
+            rec.last_error = Some("no project path".to_string());
+            rec.updated_at = crate::state::now();
+        }
+        let snapshot = issues.clone();
+        drop(issues);
+        let _ = save_state(&snapshot);
         return format!("ignored: no project for {}", repo);
     }
 
     let thread_id = launch_agent(&issue, &project, &state.config, None);
 
+    {
+        let mut issues = state.issues.lock().unwrap();
+        let rec = issues.entry(key.clone()).or_default();
+        if let Some(ref id) = thread_id {
+            rec.status = IssueStatus::Completed;
+            rec.thread_id = Some(id.clone());
+            rec.last_error = None;
+            tracing::info!(issue = %key, thread_id = %id, "launch succeeded");
+        } else {
+            rec.status = IssueStatus::Failed;
+            rec.last_error = Some("launch_agent failed".to_string());
+            tracing::error!(issue = %key, "launch failed");
+        }
+        rec.updated_at = crate::state::now();
+        let snapshot = issues.clone();
+        drop(issues);
+        let _ = save_state(&snapshot);
+    }
+
     if let Some(ref id) = thread_id {
-        let mut thr = state.threads.lock().unwrap();
-        thr.insert(key.clone(), id.clone());
-        let p = state.processed.lock().unwrap();
-        let t = state.threads.lock().unwrap();
-        let _ = save_state(&p, &t);
+        // keep a direct mapping for traceability (already in record.thread_id)
+        let _ = id;
     }
 
     match thread_id {
@@ -265,11 +311,9 @@ fn is_allowed_ip(ip: IpAddr) -> bool {
                 return true;
             }
             let o = v4.octets();
-            // Tailscale CGNAT range 100.64.0.0/10
             if o[0] == 100 && (o[1] & 0xC0) == 64 {
                 return true;
             }
-            // GitHub hook IP ranges
             if o[0] == 192 && o[1] == 30 && o[2] >= 252 {
                 return true;
             }
@@ -344,5 +388,190 @@ fn issue_matches_label(label: &str, issue: &Value, action: &str, payload: &Value
             .filter_map(|l| l.get("name").and_then(|n| n.as_str()))
             .any(|n| n == label),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::config::{Config, RepoEntry};
+    use crate::state::{load_state, IssueStatus};
+    use serde_json::json;
+    use std::sync::Mutex;
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn make_config(tmp: &std::path::Path) -> Config {
+        Config {
+            repos: vec![RepoEntry {
+                name: "repo".to_string(),
+                path: tmp.to_string_lossy().to_string(),
+                github: "org/repo".to_string(),
+                hook_id: None,
+                enabled: true,
+            }],
+            ..Config::default()
+        }
+    }
+
+    fn write_script(name: &str, body: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(name);
+        std::fs::write(&p, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p
+    }
+
+    #[tokio::test]
+    async fn failed_launch_allows_retry() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join("factory_lc_failed");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state_file = std::env::temp_dir().join("factory_lc_failed_state.json");
+        let _ = std::fs::remove_file(&state_file);
+        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+
+        let t3_fail = write_script("t3_fail.sh", "#!/bin/sh\nexit 1\n");
+        std::env::set_var("ISSUE_FACTORY_T3", t3_fail.to_str().unwrap());
+
+        let state = AppState {
+            config: Arc::new(make_config(&tmp)),
+            issues: Arc::new(Mutex::new(load_state())),
+        };
+
+        let payload = json!({
+            "action": "opened",
+            "issue": {"number": 1, "title": "t", "labels": [{"name": "status/ready"}], "url": "u"},
+            "repository": {"full_name": "org/repo"}
+        });
+
+        let r = handle_payload(state.clone(), payload.clone()).await;
+        assert!(r.starts_with("failed"), "{}", r);
+
+        let t3_ok = write_script(
+            "t3_ok.sh",
+            "#!/bin/sh\necho '{\"threadId\":\"thread-123\"}'\n",
+        );
+        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+
+        let r2 = handle_payload(state.clone(), payload).await;
+        assert!(r2.starts_with("launched"), "{}", r2);
+
+        let issues = state.issues.lock().unwrap();
+        let rec = issues.get("org/repo#1").unwrap();
+        assert_eq!(rec.status, IssueStatus::Completed);
+        assert_eq!(rec.thread_id.as_deref(), Some("thread-123"));
+
+        std::env::remove_var("ISSUE_FACTORY_T3");
+        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+    }
+
+    #[tokio::test]
+    async fn duplicate_delivery_is_idempotent() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join("factory_lc_dup");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state_file = std::env::temp_dir().join("factory_lc_dup_state.json");
+        let _ = std::fs::remove_file(&state_file);
+        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+
+        let t3_ok = write_script(
+            "t3_ok2.sh",
+            "#!/bin/sh\necho '{\"threadId\":\"thread-dup\"}'\n",
+        );
+        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+
+        let state = AppState {
+            config: Arc::new(make_config(&tmp)),
+            issues: Arc::new(Mutex::new(load_state())),
+        };
+        let payload = json!({
+            "action": "opened",
+            "issue": {"number": 2, "title": "t", "labels": [{"name": "status/ready"}], "url": "u"},
+            "repository": {"full_name": "org/repo"}
+        });
+
+        let r1 = handle_payload(state.clone(), payload.clone()).await;
+        assert!(r1.starts_with("launched"), "{}", r1);
+        let r2 = handle_payload(state.clone(), payload).await;
+        assert!(r2.contains("already"), "{}", r2);
+
+        std::env::remove_var("ISSUE_FACTORY_T3");
+        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_deliveries_single_launch() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join("factory_lc_conc");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state_file = std::env::temp_dir().join("factory_lc_conc_state.json");
+        let _ = std::fs::remove_file(&state_file);
+        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+
+        let t3_slow = write_script(
+            "t3_slow.sh",
+            "#!/bin/sh\nsleep 1\necho '{\"threadId\":\"thread-conc\"}'\n",
+        );
+        std::env::set_var("ISSUE_FACTORY_T3", t3_slow.to_str().unwrap());
+
+        let state = AppState {
+            config: Arc::new(make_config(&tmp)),
+            issues: Arc::new(Mutex::new(load_state())),
+        };
+        let payload = json!({
+            "action": "opened",
+            "issue": {"number": 3, "title": "t", "labels": [{"name": "status/ready"}], "url": "u"},
+            "repository": {"full_name": "org/repo"}
+        });
+
+        let h1 = tokio::spawn(handle_payload(state.clone(), payload.clone()));
+        let h2 = tokio::spawn(handle_payload(state.clone(), payload));
+        let a = h1.await.unwrap();
+        let b = h2.await.unwrap();
+        // one launched, one ignored as already running
+        let vals = [a, b];
+        assert!(vals.iter().any(|v| v.starts_with("launched")), "{:?}", vals);
+        assert!(
+            vals.iter().any(|v| v.contains("already running")),
+            "{:?}",
+            vals
+        );
+
+        std::env::remove_var("ISSUE_FACTORY_T3");
+        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+    }
+
+    #[tokio::test]
+    async fn restart_recovery_marks_running_failed() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let state_file = std::env::temp_dir().join("factory_lc_restart_state.json");
+        let _ = std::fs::remove_file(&state_file);
+        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+
+        // persist a running record
+        let mut m = std::collections::HashMap::new();
+        m.insert(
+            "org/repo#9".to_string(),
+            IssueState {
+                status: IssueStatus::Running,
+                attempts: 1,
+                ..IssueState::default()
+            },
+        );
+        crate::state::save_state(&m).unwrap();
+
+        let loaded = load_state();
+        assert_eq!(
+            loaded.get("org/repo#9").unwrap().status,
+            IssueStatus::Failed
+        );
+
+        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
     }
 }
