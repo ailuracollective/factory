@@ -29,11 +29,12 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      # Temporary: only validate the CLI while gateway/dashboard CI is paused.
       - name: Format check
-        run: pnpm fmt:check
+        run: pnpm --filter cli fmt:check
       - name: Clippy
-        run: pnpm clippy
+        run: pnpm --filter cli clippy
       - name: Build
-        run: pnpm build
+        run: pnpm --filter cli build
       - name: Test
-        run: pnpm test
+        run: pnpm --filter cli test
