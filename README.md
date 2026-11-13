@@ -8,7 +8,7 @@ Runs locally on your machine — no cloud hosting required.
 ```bash
 git clone https://github.com/ailuracollective/factory.git
 cd factory
-pip install -e .
+uv sync
 ```
 
 ## Quick start
@@ -64,7 +64,7 @@ Config lives at `~/.config/factory/config.json`. See `factory init`.
 ## Tests
 
 ```bash
-PYTHONPATH=src pytest -q
+uv run pytest -q
 ```
 
 ## License

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
+import sys
 
 from factory.config import load_config
 
@@ -39,7 +39,7 @@ def run_doctor() -> list[tuple[str, bool, str]]:
     results.append(("tailscale funnel", code == 0, out.splitlines()[0] if out else "ok"))
 
     # python
-    results.append(("python", True, os.sys.version.split()[0]))
+    results.append(("python", True, sys.version.split()[0]))
 
     # config
     try:

@@ -2,161 +2,199 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
+
+import typer
 
 from factory import __version__
 from factory.agent_launcher import launch_agent
-from factory.config import add_repo as cfg_add_repo
 from factory.config import get_repo, load_config, save_config
 from factory.doctor import run_doctor
 from factory.repo_manager import add_repo as repo_add
 from factory.repo_manager import list_repos, sync_labels
-from factory.repo_manager import remove_repo as repo_remove
-from factory.webhook_manager import create_webhook
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"factory {__version__}")
+        raise typer.Exit()
+
+
+app = typer.Typer(help="AI Factory CLI", add_completion=True)
+
+
+@app.callback()
+def main_callback(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version",
+    ),
+) -> None:
+    pass
+repo_app = typer.Typer(help="Manage repos")
+secret_app = typer.Typer(help="Manage secret")
+app.add_typer(repo_app, name="repo")
+app.add_typer(secret_app, name="secret")
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
-def cmd_init(args: argparse.Namespace) -> int:
+@app.command()
+def init(force: bool = typer.Option(False, "--force", help="Overwrite existing config")) -> None:
     """Initialize factory config."""
     from factory.config import CONFIG_DIR, CONFIG_FILE, default_config, save_config
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if CONFIG_FILE.exists() and not args.force:
-        print(f"Config already exists at {CONFIG_FILE}. Use --force to overwrite.")
-        return 1
+    if CONFIG_FILE.exists() and not force:
+        typer.echo(f"Config already exists at {CONFIG_FILE}. Use --force to overwrite.")
+        raise typer.Exit(1)
     cfg = default_config()
-    # generate secret
     import secrets
 
     cfg["webhook"]["secret"] = secrets.token_hex(32)
     save_config(cfg)
-    print(f"Config created at {CONFIG_FILE}")
-    print(f"Secret: {cfg['webhook']['secret']}")
-    print("Next: run 'factory doctor' to verify dependencies.")
-    return 0
+    typer.echo(f"Config created at {CONFIG_FILE}")
+    typer.echo(f"Secret: {cfg['webhook']['secret']}")
+    typer.echo("Next: run 'factory doctor' to verify dependencies.")
 
 
-def cmd_repo_add(args: argparse.Namespace) -> int:
+@repo_app.command("add")
+def repo_add_cmd(
+    repo: str = typer.Argument(..., help="Repo name (owner/repo) or local path"),
+) -> None:
     """Add a repo to the factory."""
-    entry = repo_add(args.repo)
+    entry = repo_add(repo)
     if entry is None:
-        print(f"Failed to add repo: {args.repo}")
-        return 1
-    # create webhook
+        typer.echo(f"Failed to add repo: {repo}")
+        raise typer.Exit(1)
     config = load_config()
     url = config.get("webhook", {}).get("funnel_url", "")
     secret = config.get("webhook", {}).get("secret", "")
     if url and secret:
-        hook_id = create_webhook(entry["github"], url, secret)
+        from factory.webhook_manager import create_webhook as cw
+
+        hook_id = cw(entry["github"], url, secret)
         if hook_id:
             entry["hook_id"] = hook_id
-            cfg_add_repo(config, entry)
+            from factory.config import add_repo as cfg_add
+
+            cfg_add(config, entry)
             save_config(config)
-            print(f"Webhook created (id={hook_id})")
-    print(f"Repo added: {entry['name']} -> {entry['path']}")
-    print(f"Labels synced: {sync_labels(entry['github'])}")
-    return 0
+            typer.echo(f"Webhook created (id={hook_id})")
+    typer.echo(f"Repo added: {entry['name']} -> {entry['path']}")
+    typer.echo(f"Labels synced: {sync_labels(entry['github'])}")
 
 
-def cmd_repo_list(args: argparse.Namespace) -> int:
+@repo_app.command("list")
+def repo_list() -> None:
     """List configured repos."""
     repos = list_repos()
     if not repos:
-        print("No repos configured. Use 'factory repo add <repo>'.")
-        return 0
+        typer.echo("No repos configured. Use 'factory repo add <repo>'.")
+        return
     for r in repos:
-        print(f"{r.get('name', '?'):30} {r.get('github', '?'):40} enabled={r.get('enabled', True)}")
-    return 0
+        name = r.get("name", "?")
+        github = r.get("github", "?")
+        enabled = r.get("enabled", True)
+        typer.echo(f"{name:30} {github:40} enabled={enabled}")
 
 
-def cmd_repo_remove(args: argparse.Namespace) -> int:
+@repo_app.command("remove")
+def repo_remove_cmd(name: str = typer.Argument(..., help="Repo name")) -> None:
     """Remove a repo from the factory."""
-    ok = repo_remove(args.name)
+    from factory.repo_manager import remove_repo as rr
+
+    ok = rr(name)
     if not ok:
-        print(f"Repo not found: {args.name}")
-        return 1
-    print(f"Repo removed: {args.name}")
-    return 0
+        typer.echo(f"Repo not found: {name}")
+        raise typer.Exit(1)
+    typer.echo(f"Repo removed: {name}")
 
 
-def cmd_repo_sync(args: argparse.Namespace) -> int:
+@repo_app.command("sync")
+def repo_sync(name: str = typer.Argument(..., help="Repo name")) -> None:
     """Sync labels for a repo."""
-    repo = get_repo(load_config(), args.name)
+    repo = get_repo(load_config(), name)
     if repo is None:
-        print(f"Repo not found: {args.name}")
-        return 1
+        typer.echo(f"Repo not found: {name}")
+        raise typer.Exit(1)
     n = sync_labels(repo["github"])
-    print(f"Synced {n} labels for {repo['github']}")
-    return 0
+    typer.echo(f"Synced {n} labels for {repo['github']}")
 
 
-def cmd_start(args: argparse.Namespace) -> int:
+@app.command()
+def start(foreground: bool = typer.Option(False, "--foreground", help="Run in foreground")) -> None:
     """Start the factory daemon."""
-    # delegate to systemd if available
     r = _run(["systemctl", "--user", "start", "factory"])
     if r.returncode == 0:
-        print("Factory started.")
-        return 0
-    print("systemd not available; run 'factory-listen' manually or use --foreground")
-    if getattr(args, "foreground", False):
+        typer.echo("Factory started.")
+        return
+    typer.echo("systemd not available.")
+    if foreground:
         from factory.listener import main as listener_main
 
         listener_main()
-        return 0
-    return 1
+        return
+    raise typer.Exit(1)
 
 
-def cmd_stop(args: argparse.Namespace) -> int:
+@app.command()
+def stop() -> None:
     """Stop the factory daemon."""
     r = _run(["systemctl", "--user", "stop", "factory"])
     if r.returncode == 0:
-        print("Factory stopped.")
-        return 0
-    print(r.stderr.strip() or "Failed to stop.")
-    return 1
+        typer.echo("Factory stopped.")
+        return
+    typer.echo(r.stderr.strip() or "Failed to stop.")
+    raise typer.Exit(1)
 
 
-def cmd_restart(args: argparse.Namespace) -> int:
+@app.command()
+def restart() -> None:
     """Restart the factory daemon."""
     r = _run(["systemctl", "--user", "restart", "factory"])
     if r.returncode == 0:
-        print("Factory restarted.")
-        return 0
-    print(r.stderr.strip() or "Failed to restart.")
-    return 1
+        typer.echo("Factory restarted.")
+        return
+    typer.echo(r.stderr.strip() or "Failed to restart.")
+    raise typer.Exit(1)
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+@app.command()
+def status() -> None:
     """Show factory status."""
     r = _run(["systemctl", "--user", "is-active", "factory"])
-    print(f"Daemon: {r.stdout.strip() or r.stderr.strip()}")
+    typer.echo(f"Daemon: {r.stdout.strip() or r.stderr.strip()}")
     cfg = load_config()
-    print(f"Repos: {len(cfg.get('repos', []))}")
+    typer.echo(f"Repos: {len(cfg.get('repos', []))}")
     for repo in cfg.get("repos", []):
-        print(f"  - {repo.get('name')} ({repo.get('github')}) enabled={repo.get('enabled', True)}")
+        name = repo.get("name")
+        github = repo.get("github")
+        enabled = repo.get("enabled", True)
+        typer.echo(f"  - {name} ({github}) enabled={enabled}")
     url = cfg.get("webhook", {}).get("funnel_url", "")
     if url:
-        print(f"Funnel: {url}")
-    return 0
+        typer.echo(f"Funnel: {url}")
 
 
-def cmd_secret_rotate(args: argparse.Namespace) -> int:
+@secret_app.command("rotate")
+def secret_rotate() -> None:
     """Rotate the webhook secret."""
+    import re
     import secrets
 
     config = load_config()
     new_secret = secrets.token_hex(32)
     config.setdefault("webhook", {})["secret"] = new_secret
     save_config(config)
-    # update webhooks
     url = config["webhook"].get("funnel_url", "")
     for repo in config.get("repos", []):
         github = repo.get("github")
@@ -165,163 +203,89 @@ def cmd_secret_rotate(args: argparse.Namespace) -> int:
             from factory.webhook_manager import update_webhook
 
             ok = update_webhook(github, hook_id, url, new_secret)
-            print(f"  {github}: {'updated' if ok else 'FAILED'}")
-    # update service file if exists
+            typer.echo(f"  {github}: {'updated' if ok else 'FAILED'}")
     service = Path.home() / ".config" / "systemd" / "user" / "factory.service"
     if service.exists():
         text = service.read_text()
-        import re
-
-        text = re.sub(
-            r"Environment=ISSUE_FACTORY_WEBHOOK_SECRET=.*",
-            f"Environment=ISSUE_FACTORY_WEBHOOK_SECRET={new_secret}",
-            text,
-        )
+        pattern = r"Environment=ISSUE_FACTORY_WEBHOOK_SECRET=.*"
+        replacement = f"Environment=ISSUE_FACTORY_WEBHOOK_SECRET={new_secret}"
+        text = re.sub(pattern, replacement, text)
         service.write_text(text)
         _run(["systemctl", "--user", "daemon-reload"])
         _run(["systemctl", "--user", "restart", "factory"])
-    print(f"New secret: {new_secret}")
-    print("Save this secret somewhere safe.")
-    return 0
+    typer.echo(f"New secret: {new_secret}")
+    typer.echo("Save this secret somewhere safe.")
 
 
-def cmd_logs(args: argparse.Namespace) -> int:
+@app.command()
+def logs(
+    follow: bool = typer.Option(False, "-f", "--follow", help="Follow log output"),
+    lines: int = typer.Option(50, "-n", "--lines", help="Number of lines"),
+) -> None:
     """Show daemon logs."""
-    cmd = ["journalctl", "--user", "-u", "factory", "--no-pager"]
-    if getattr(args, "follow", False):
+    cmd = ["journalctl", "--user", "-u", "factory", "--no-pager", "-n", str(lines)]
+    if follow:
         cmd = ["journalctl", "--user", "-u", "factory", "-f"]
-    if getattr(args, "lines", None):
-        cmd += ["-n", str(args.lines)]
     os.execvp("journalctl", cmd)
-    return 0
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+@app.command()
+def doctor() -> None:
     """Run diagnostics."""
     results = run_doctor()
     for name, ok, detail in results:
         status = "OK" if ok else "FAIL"
-        print(f"[{status}] {name}: {detail}")
+        typer.echo(f"[{status}] {name}: {detail}")
     failed = [r for r in results if not r[1]]
-    return 1 if failed else 0
+    if failed:
+        raise typer.Exit(1)
 
 
-def cmd_test(args: argparse.Namespace) -> int:
+@app.command()
+def test(
+    repo: str = typer.Argument(..., help="Repo name"),
+    issue: int = typer.Argument(..., help="Issue number"),
+) -> None:
     """Manually launch an agent for an issue."""
     config = load_config()
-    repo = get_repo(config, args.repo)
-    if repo is None:
-        print(f"Repo not found: {args.repo}")
-        return 1
-    project = Path(repo["path"])
+    repo_entry = get_repo(config, repo)
+    if repo_entry is None:
+        typer.echo(f"Repo not found: {repo}")
+        raise typer.Exit(1)
+    project = Path(repo_entry["path"])
     if not project.exists():
-        print(f"Project path not found: {project}")
-        return 1
-    # fetch issue
-    r = _run(
-        [
-            "gh",
-            "issue",
-            "view",
-            str(args.issue),
-            "--repo",
-            repo["github"],
-            "--json",
-            "number,title,body,url,labels",
-        ]
-    )
+        typer.echo(f"Project path not found: {project}")
+        raise typer.Exit(1)
+    cmd = [
+        "gh",
+        "issue",
+        "view",
+        str(issue),
+        "--repo",
+        repo_entry["github"],
+        "--json",
+        "number,title,body,url,labels",
+    ]
+    r = _run(cmd)
     if r.returncode != 0:
-        print(f"Failed to fetch issue: {r.stderr.strip()}")
-        return 1
+        typer.echo(f"Failed to fetch issue: {r.stderr.strip()}")
+        raise typer.Exit(1)
     try:
-        issue = json.loads(r.stdout)
+        issue_data = json.loads(r.stdout)
     except json.JSONDecodeError:
-        print("Failed to parse issue JSON")
-        return 1
-    thread_id = launch_agent(issue, project, config)
+        typer.echo("Failed to parse issue JSON")
+        raise typer.Exit(1) from None
+    thread_id = launch_agent(issue_data, project, config)
     if thread_id:
-        print(f"Launched thread: {thread_id}")
-        return 0
-    print("Failed to launch agent.")
-    return 1
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="factory", description="AI Factory CLI")
-    parser.add_argument("--version", action="version", version=f"factory {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # init
-    p = sub.add_parser("init", help="Initialize factory config")
-    p.add_argument("--force", action="store_true", help="Overwrite existing config")
-    p.set_defaults(func=cmd_init)
-
-    # repo
-    repo_parser = sub.add_parser("repo", help="Manage repos")
-    repo_sub = repo_parser.add_subparsers(dest="repo_command", required=True)
-
-    p = repo_sub.add_parser("add", help="Add a repo")
-    p.add_argument("repo", help="Repo name (owner/repo) or URL")
-    p.set_defaults(func=cmd_repo_add)
-
-    p = repo_sub.add_parser("list", help="List repos")
-    p.set_defaults(func=cmd_repo_list)
-
-    p = repo_sub.add_parser("remove", help="Remove a repo")
-    p.add_argument("name", help="Repo name")
-    p.set_defaults(func=cmd_repo_remove)
-
-    p = repo_sub.add_parser("sync", help="Sync labels for a repo")
-    p.add_argument("name", help="Repo name")
-    p.set_defaults(func=cmd_repo_sync)
-
-    # start/stop/restart
-    for name, func, help_text in [
-        ("start", cmd_start, "Start daemon"),
-        ("stop", cmd_stop, "Stop daemon"),
-        ("restart", cmd_restart, "Restart daemon"),
-    ]:
-        p = sub.add_parser(name, help=help_text)
-        p.set_defaults(func=func)
-
-    # status
-    p = sub.add_parser("status", help="Show status")
-    p.set_defaults(func=cmd_status)
-
-    # secret
-    p = sub.add_parser("secret", help="Manage secret")
-    secret_sub = p.add_subparsers(dest="secret_command", required=True)
-    sp = secret_sub.add_parser("rotate", help="Rotate webhook secret")
-    sp.set_defaults(func=cmd_secret_rotate)
-
-    # logs
-    p = sub.add_parser("logs", help="Show daemon logs")
-    p.add_argument("-f", "--follow", action="store_true", help="Follow log output")
-    p.add_argument("-n", "--lines", type=int, default=50, help="Number of lines")
-    p.set_defaults(func=cmd_logs)
-
-    # doctor
-    p = sub.add_parser("doctor", help="Run diagnostics")
-    p.set_defaults(func=cmd_doctor)
-
-    # test
-    p = sub.add_parser("test", help="Manually launch agent for an issue")
-    p.add_argument("repo", help="Repo name")
-    p.add_argument("issue", type=int, help="Issue number")
-    p.set_defaults(func=cmd_test)
-
-    return parser
+        typer.echo(f"Launched thread: {thread_id}")
+        return
+    typer.echo("Failed to launch agent.")
+    raise typer.Exit(1)
 
 
 def main() -> None:
     """CLI entry point."""
-    parser = build_parser()
-    args = parser.parse_args()
-    func = getattr(args, "func", None)
-    if func is None:
-        parser.print_help()
-        sys.exit(1)
-    sys.exit(func(args))
+    app()
 
 
 if __name__ == "__main__":
