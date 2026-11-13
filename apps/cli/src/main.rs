@@ -1,5 +1,6 @@
 mod agent;
 mod cli;
+mod commands;
 mod config;
 mod doctor;
 mod listener;

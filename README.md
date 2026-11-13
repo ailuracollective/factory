@@ -55,7 +55,9 @@ with the secret from `factory init`.
 
 Alternatively, `factory mentions` polls allowlisted repositories for mentions of
 your configured GitHub username and dispatches authorized requests without the
-Gateway or GitHub notifications. See [docs/mentions.md](docs/mentions.md).
+Gateway or GitHub notifications. Mention commands (`help`, `status`, `plan`,
+`implement`, `review`, `test`, `cancel`) are documented in
+[docs/commands.md](docs/commands.md) and [docs/mentions.md](docs/mentions.md).
 
 ## Requirements
 

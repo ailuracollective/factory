@@ -177,6 +177,7 @@ pub fn listen(port: Option<u16>) -> Result<()> {
 }
 
 pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
+    use crate::commands::SqliteExecutionStore;
     use crate::mentions::{AgentDispatcher, Engine, GhAuthorizer, GhEventSource, SqliteEventStore};
 
     let config = load_config()?;
@@ -189,6 +190,7 @@ pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
         return Ok(());
     }
     let store = SqliteEventStore;
+    let executions = SqliteExecutionStore;
     let mut source = GhEventSource;
     loop {
         // Reload config each poll so username/policy changes apply without a restart.
@@ -198,11 +200,12 @@ pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
             .max(5);
         let dispatcher = AgentDispatcher { config: &config };
         let authorizer = GhAuthorizer;
-        let engine = Engine::new(&config, &store, &dispatcher, &authorizer);
+        let engine = Engine::new(&config, &store, &executions, &dispatcher, &authorizer);
         match engine.poll(&mut source, crate::state::now()) {
             Ok(summary) => tracing::info!(
                 ignored = summary.ignored,
                 rejected = summary.rejected,
+                completed = summary.completed,
                 launched = summary.launched,
                 failed = summary.failed,
                 "mention poll complete"
