@@ -1,0 +1,15 @@
+{
+  "name": "gateway",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "cargo build --target wasm32-unknown-unknown --release",
+    "build:debug": "cargo build --target wasm32-unknown-unknown",
+    "test": "cargo test",
+    "fmt": "cargo fmt",
+    "fmt:check": "cargo fmt --check",
+    "clippy": "cargo clippy --target wasm32-unknown-unknown",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

@@ -64,6 +64,18 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Register this runner with a gateway
+    Connect {
+        gateway: String,
+        runner: String,
+        #[arg(long)]
+        bootstrap_secret: Option<String>,
+    },
+    /// Run as a connected runner (poll gateway for jobs)
+    Runner {
+        #[arg(long)]
+        once: bool,
+    },
     /// Manually launch an agent for an issue
     Test {
         repo: String,
@@ -118,6 +130,12 @@ fn main() -> ExitCode {
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor => cli::doctor(),
         Commands::Listen { port } => cli::listen(port),
+        Commands::Connect {
+            gateway,
+            runner,
+            bootstrap_secret,
+        } => cli::connect(&gateway, &runner, bootstrap_secret.as_deref()),
+        Commands::Runner { once } => cli::runner(once),
         Commands::Test {
             repo,
             issue,

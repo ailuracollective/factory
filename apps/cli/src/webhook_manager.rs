@@ -77,6 +77,7 @@ pub fn update_webhook(repo_slug: &str, hook_id: u64, url: &str, secret: &str) ->
     Ok(code == 0)
 }
 
+#[allow(dead_code)]
 pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
     let path = format!("repos/{}/hooks/{}", repo_slug, hook_id);
     let (code, _) = run(&[
@@ -89,6 +90,7 @@ pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
     Ok(code == 0)
 }
 
+#[allow(dead_code)]
 pub fn sync_webhook(name: &str) -> Result<bool> {
     let mut config = load_config()?;
     let repo = match get_repo(&config, name) {

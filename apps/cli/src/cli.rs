@@ -1,5 +1,4 @@
 use crate::config::{get_repo, load_config, save_config};
-use crate::doctor::run_doctor;
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -320,4 +319,182 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
         None => println!("Failed to launch agent."),
     }
     Ok(())
+}
+
+pub fn connect(gateway: &str, runner: &str, bootstrap_secret: Option<&str>) -> Result<()> {
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/runners/register", gateway.trim_end_matches('/'));
+    let mut req = client
+        .post(&url)
+        .json(&serde_json::json!({"runner_id": runner}));
+    if let Some(s) = bootstrap_secret {
+        req = req.header("x-bootstrap-secret", s);
+    }
+    let resp = req.send()?;
+    if !resp.status().is_success() {
+        println!("Registration failed: {}", resp.status());
+        return Ok(());
+    }
+    let body: serde_json::Value = resp.json()?;
+    let token = body
+        .get("token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if token.is_empty() {
+        println!("No token returned.");
+        return Ok(());
+    }
+    let mut config = load_config()?;
+    config.gateway.url = gateway.trim_end_matches('/').to_string();
+    config.gateway.runner_id = runner.to_string();
+    config.gateway.token = token.clone();
+    save_config(&config)?;
+    println!("Runner registered: {} -> {}", runner, gateway);
+    println!("Token saved to config.");
+    Ok(())
+}
+
+fn encode_path_segment(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+pub fn runner(once: bool) -> Result<()> {
+    loop {
+        let config = load_config()?;
+        let gw = config.gateway.url.clone();
+        let runner_id = config.gateway.runner_id.clone();
+        let token = config.gateway.token.clone();
+        if gw.is_empty() || runner_id.is_empty() || token.is_empty() {
+            println!("Not connected. Run 'factory connect' first.");
+            return Ok(());
+        }
+        let client = reqwest::blocking::Client::new();
+        let claim_url = format!("{}/jobs/claim", gw);
+        let resp = client
+            .post(&claim_url)
+            .json(&serde_json::json!({"runner_id": runner_id, "token": token}))
+            .send();
+        match resp {
+            Ok(r) if r.status().as_u16() == 204 => {
+                if once {
+                    println!("No job available.");
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                continue;
+            }
+            Ok(r) if r.status().is_success() => {
+                let job: serde_json::Value = match r.json() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        println!("Invalid job response.");
+                        if once {
+                            return Ok(());
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        continue;
+                    }
+                };
+                let job_id = job
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let repo = job
+                    .get("repo")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let number = job
+                    .get("issue_number")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let title = job
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let url = job
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // resolve project path
+                let repo_entry = config
+                    .repos
+                    .iter()
+                    .find(|r| r.github == repo || r.name == repo)
+                    .cloned();
+                let project = repo_entry.map(|r| std::path::PathBuf::from(r.path));
+                let project = match project {
+                    Some(p) if p.exists() => p,
+                    _ => {
+                        println!("No project path for {}", repo);
+                        let _ = client
+                            .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
+                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "no project path"}))
+                            .send();
+                        if once {
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                };
+
+                let issue =
+                    serde_json::json!({"number": number, "title": title, "url": url, "labels": []});
+                // heartbeat running
+                let _ = client
+                    .post(format!("{}/jobs/{}/heartbeat", gw, encode_path_segment(&job_id)))
+                    .json(&serde_json::json!({"runner_id": runner_id, "token": token, "status": "running"}))
+                    .send();
+
+                match crate::agent::launch_agent(&issue, &project, &config, None) {
+                    Some(tid) => {
+                        let _ = client
+                            .post(format!("{}/jobs/{}/complete", gw, encode_path_segment(&job_id)))
+                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "thread_id": tid}))
+                            .send();
+                        println!("Completed job {} -> {}", job_id, tid);
+                    }
+                    None => {
+                        let _ = client
+                            .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
+                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "agent launch failed"}))
+                            .send();
+                        println!("Failed job {}", job_id);
+                    }
+                }
+
+                if once {
+                    return Ok(());
+                }
+            }
+            Ok(r) => {
+                println!("Claim failed: {}", r.status());
+                if once {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+            Err(e) => {
+                println!("Network error: {}", e);
+                if once {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
+    }
 }

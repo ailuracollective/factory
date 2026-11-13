@@ -141,14 +141,14 @@ pub fn save_state(issues: &HashMap<String, IssueState>) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use std::sync::Mutex;
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    pub static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn roundtrip_state() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let mut m = HashMap::new();
         m.insert(
             "repo#1".to_string(),
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn migrate_legacy_processed() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let tmp = std::env::temp_dir().join("factory_state_legacy.json");
         std::env::set_var("ISSUE_FACTORY_STATE_FILE", tmp.to_str().unwrap());
         let legacy = serde_json::json!({
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn reconcile_running_to_failed() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let tmp = std::env::temp_dir().join("factory_state_running.json");
         std::env::set_var("ISSUE_FACTORY_STATE_FILE", tmp.to_str().unwrap());
         let mut m = HashMap::new();

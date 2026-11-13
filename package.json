@@ -1,0 +1,16 @@
+{
+  "name": "ailura-factory",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dashboard:dev": "pnpm --filter dashboard dev",
+    "dashboard:build": "pnpm --filter dashboard build",
+    "cli:build": "pnpm --filter cli build",
+    "gateway:build": "pnpm --filter gateway build",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "fmt": "pnpm -r fmt",
+    "fmt:check": "pnpm -r fmt:check",
+    "clippy": "pnpm -r clippy"
+  }
+}

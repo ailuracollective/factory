@@ -10,20 +10,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Build, test, fmt, clippy
+  build:
+    name: Build & test (pnpm workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
       - name: Format check
-        run: cargo fmt --check
+        run: pnpm fmt:check
       - name: Clippy
-        run: cargo clippy
+        run: pnpm clippy
       - name: Build
-        run: cargo build --release
+        run: pnpm build
       - name: Test
-        run: cargo test
+        run: pnpm test

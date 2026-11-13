@@ -398,7 +398,6 @@ mod lifecycle_tests {
     use crate::state::{load_state, IssueStatus};
     use serde_json::json;
     use std::sync::Mutex;
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_config(tmp: &std::path::Path) -> Config {
         Config {
@@ -426,7 +425,9 @@ mod lifecycle_tests {
 
     #[tokio::test]
     async fn failed_launch_allows_retry() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join("factory_lc_failed");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -471,7 +472,9 @@ mod lifecycle_tests {
 
     #[tokio::test]
     async fn duplicate_delivery_is_idempotent() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join("factory_lc_dup");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -506,7 +509,9 @@ mod lifecycle_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_deliveries_single_launch() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join("factory_lc_conc");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -549,7 +554,9 @@ mod lifecycle_tests {
 
     #[tokio::test]
     async fn restart_recovery_marks_running_failed() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state_file = std::env::temp_dir().join("factory_lc_restart_state.json");
         let _ = std::fs::remove_file(&state_file);
         std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());

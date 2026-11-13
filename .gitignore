@@ -3,3 +3,7 @@
 .env
 .issue_factory_state.json
 state.json
+node_modules/
+apps/dashboard/dist/
+target/
+.dev.vars

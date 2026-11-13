@@ -1,5 +1,4 @@
 use crate::config::{get_repo, load_config, save_config, RepoEntry};
-use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,15 +24,18 @@ fn run(cmd: &[&str], cwd: Option<&std::path::Path>) -> (i32, String) {
     }
 }
 
-pub fn resolve_project_path(name_or_path: &str, projects_base: &PathBuf) -> Option<PathBuf> {
+pub fn resolve_project_path(
+    name_or_path: &str,
+    projects_base: &std::path::Path,
+) -> Option<PathBuf> {
     let candidate = PathBuf::from(name_or_path);
     if candidate.exists() {
         return candidate.canonicalize().ok();
     }
     let name = name_or_path
         .trim_end_matches('/')
-        .split('/')
-        .last()
+        .rsplit('/')
+        .next()
         .unwrap_or("")
         .replace(".git", "");
     let dest = projects_base.join(&name);
@@ -43,7 +45,7 @@ pub fn resolve_project_path(name_or_path: &str, projects_base: &PathBuf) -> Opti
     None
 }
 
-pub fn register_t3(project_path: &PathBuf) -> bool {
+pub fn register_t3(project_path: &std::path::Path) -> bool {
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
     let (code, _) = run(
         &[&t3_bin, "project", "add", project_path.to_str().unwrap()],
@@ -147,7 +149,7 @@ pub fn add_repo(name_or_path: &str) -> Option<RepoEntry> {
             .to_string_lossy()
             .to_string()
     };
-    let name = slug.split('/').last().unwrap_or(&slug).to_string();
+    let name = slug.rsplit('/').next().unwrap_or(&slug).to_string();
 
     register_t3(&project_path);
     sync_labels(&slug);

@@ -39,6 +39,16 @@ pub struct RepoEntry {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GatewayConfig {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub runner_id: String,
+    #[serde(default)]
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub version: u32,
@@ -48,6 +58,8 @@ pub struct Config {
     pub webhook: WebhookConfig,
     pub defaults: Defaults,
     pub repos: Vec<RepoEntry>,
+    #[serde(default)]
+    pub gateway: GatewayConfig,
 }
 
 impl Default for Config {
@@ -74,6 +86,7 @@ impl Default for Config {
                 max_attempts: 3,
             },
             repos: Vec::new(),
+            gateway: GatewayConfig::default(),
         }
     }
 }
@@ -121,6 +134,7 @@ pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
         .find(|r| r.name == name || r.github == name)
 }
 
+#[allow(dead_code)]
 pub fn get_repo_mut<'a>(config: &'a mut Config, name: &str) -> Option<&'a mut RepoEntry> {
     config
         .repos

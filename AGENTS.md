@@ -4,59 +4,42 @@ Guidance for coding agents working in this repository.
 
 ## Project
 
-AI Factory is a Rust CLI (`factory`) that listens to GitHub issue webhooks and launches
-T3 Code agents to resolve them. Entry point: `src/main.rs` (clap). Modules live in `src/`.
+Ailura Factory is a monorepo for AI-assisted development automation.
+
+- `apps/cli` — Rust CLI (`factory`), runs agents locally (T3 Code today).
+- `apps/gateway` — Rust Cloudflare Worker (GitHub App gateway, D1 persistence).
+- `apps/dashboard` — TanStack (React) admin dashboard.
+- `docs/` — architecture, audit, migration plan, roadmap.
+- `Cargo.toml` (root) — Cargo workspace for Rust crates.
+- `pnpm-workspace.yaml` — pnpm workspace for TypeScript apps.
 
 ## Build / Test / Lint
 
+Rust (via pnpm workspace):
 ```bash
-cargo build            # dev build
-cargo build --release  # release build (binary: target/release/factory)
-cargo test             # run tests (none yet)
-cargo fmt              # format
-cargo fmt --check      # verify formatting
-cargo clippy           # lint
+pnpm install
+pnpm fmt:check
+pnpm clippy
+pnpm build
+pnpm test
 ```
 
-Install locally after release build:
-
+Dashboard:
 ```bash
-cp target/release/factory ~/.local/bin/factory
+pnpm --filter dashboard build
 ```
-
-## Run
-
-```bash
-cargo run -- doctor
-cargo run -- listen --port 8787
-# or installed binary:
-factory doctor
-```
-
-## Architecture
-
-- `src/main.rs` — clap CLI dispatch
-- `src/cli.rs` — command implementations
-- `src/config.rs` — `~/.config/factory/config.json` load/save
-- `src/state.rs` — processed issues / thread ids (`~/.config/factory/state.json`)
-- `src/listener.rs` — axum webhook server (HMAC verify, IP allowlist, background tasks)
-- `src/agent.rs` — builds prompt, invokes `t3 thread start`
-- `src/repo_manager.rs` — repo resolution, T3 registration, label sync
-- `src/webhook_manager.rs` — GitHub webhook CRUD via `gh`
-- `src/doctor.rs` — dependency diagnostics
 
 ## Conventions
 
-- Rust 2021 edition; errors via `anyhow::Result`.
-- Config/state are JSON on disk under `~/.config/factory/`.
-- External tools (`gh`, `t3`, `curl`, `git`) are invoked with `std::process::Command`; prefer
-  the existing `run(...)` helpers.
-- Environment overrides: `ISSUE_FACTORY_*` (see README).
-- Keep changes minimal; no tests exist yet — add a small test or assertion for new non-trivial logic.
+- Rust 2021 edition; errors via `anyhow::Result` in CLI.
+- Gateway targets `wasm32-unknown-unknown` via Cloudflare Workers (`worker` crate). No Tokio/SQLx in gateway; use D1 bindings and async/await.
+- Config/state are JSON on disk under `~/.config/ailuracollective/factory/` (CLI).
+- External tools invoked with `std::process::Command`; prefer existing `run(...)` helpers.
+- Environment overrides: `ISSUE_FACTORY_*`.
+- Keep changes minimal; add small tests for new non-trivial logic.
+- Preserve existing CLI commands and behavior.
 
 ## Notes
 
-- `cargo clippy`/`cargo fmt --check` currently report warnings/formatting debt; don't
-  introduce new ones.
-- The listener binds `0.0.0.0`; IP allowlist in `listener.rs` restricts access.
-- Webhook secret empty disables signature verification (dev only).
+- Gateway does not replace the local listener; keep both during transition.
+- Do not couple gateway to a specific AI provider.
