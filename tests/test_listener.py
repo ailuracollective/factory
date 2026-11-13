@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from factory.listener import build_prompt, load_state, save_state
+from factory.agent_launcher import build_prompt
+from factory.listener import load_state, save_state
 
 
 def test_load_state_missing(tmp_path: Path) -> None:
@@ -15,7 +16,7 @@ def test_load_state_missing(tmp_path: Path) -> None:
 def test_save_and_load_state(tmp_path: Path) -> None:
     """State round-trips through disk."""
     path = tmp_path / "state.json"
-    save_state(path, {"1", "2"}, {"1": "thread-1"})
+    save_state({"1", "2"}, {"1": "thread-1"}, path)
     processed, threads = load_state(path)
     assert processed == {"1", "2"}
     assert threads == {"1": "thread-1"}

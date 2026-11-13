@@ -14,7 +14,7 @@ dev = [
 ]
 
 [project.scripts]
-factory-listen = "factory.listener:main"
+factory = "factory.cli:main"
 
 [dependency-groups]
 dev = [
