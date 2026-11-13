@@ -27,7 +27,7 @@ pub fn build_prompt(issue: &Value) -> String {
         .unwrap_or("")
         .trim();
     format!(
-        "Resolve GitHub issue #{number}: {url}\n\nRead the issue via `gh issue view {number}` for full details.\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Run the project test suite and linters before finishing.\n- Open a pull request that references the issue (Closes #{number}).\n- Do not merge the pull request.\n",
+        "Resolve GitHub issue #{number}: {url}\n\nRead the issue via `gh issue view {number}` for full details.\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Before finishing, run the project's full test suite, linters and build; only proceed if every check passes. If a check fails, fix the underlying cause and re-run until green — do not skip, disable, or weaken tests to make them pass.\n- Open a pull request that references the issue (Closes #{number}), including the passing check results in the PR description.\n- Do not merge the pull request.\n",
         number = number,
         url = url
     )
@@ -80,6 +80,7 @@ pub fn launch_agent(
         .arg(&base_branch)
         .arg("--branch")
         .arg(&branch)
+        .arg("--wait")
         .arg("--json")
         .current_dir(project);
 
