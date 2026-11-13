@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -13,23 +16,20 @@ def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
 
 
-def clone_repo(url_or_name: str, projects_base: Path) -> Path | None:
-    """Clone a repo if not present. Returns the path."""
-    name = url_or_name.rstrip("/").split("/")[-1].replace(".git", "")
+def resolve_project_path(name_or_path: str, projects_base: Path) -> Path | None:
+    """Resolve a project path from a name or path. Does not clone."""
+    candidate = Path(name_or_path).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    name = name_or_path.rstrip("/").split("/")[-1].replace(".git", "")
     dest = projects_base / name
     if dest.exists():
-        return dest
-    url = url_or_name if url_or_name.startswith("http") else f"https://github.com/{url_or_name}.git"
-    result = _run(["git", "clone", url, str(dest)])
-    if result.returncode != 0:
-        return None
-    return dest
+        return dest.resolve()
+    return None
 
 
 def register_t3(project_path: Path) -> bool:
     """Register a project in T3 Code."""
-    import os
-
     t3_bin = os.environ.get("ISSUE_FACTORY_T3", "t3")
     result = _run([t3_bin, "project", "add", str(project_path)])
     return result.returncode == 0
@@ -37,10 +37,7 @@ def register_t3(project_path: Path) -> bool:
 
 def sync_labels(repo_slug: str, labels_file: Path | None = None) -> int:
     """Apply labels from standards repo. Returns count applied."""
-    import urllib.request
-
     if labels_file is None or not labels_file.exists():
-        # download from standards repo
         url = "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml"
         try:
             data = urllib.request.urlopen(url).read().decode()
@@ -48,8 +45,6 @@ def sync_labels(repo_slug: str, labels_file: Path | None = None) -> int:
             return 0
         labels_file = Path("/tmp/labels.yml")
         labels_file.write_text(data)
-    import re
-
     text = labels_file.read_text()
     pattern = re.compile(
         r'-\s*name:\s*"([^"]+)"\s*\n\s*color:\s*"([^"]+)"\s*\n\s*description:\s*"([^"]*)"',
@@ -89,31 +84,29 @@ def sync_labels(repo_slug: str, labels_file: Path | None = None) -> int:
     return count
 
 
-def add_repo(name_or_url: str) -> dict[str, Any] | None:
-    """Add a repo to the factory. Returns the entry or None on failure."""
+def _detect_slug(project_path: Path) -> str:
+    """Detect the GitHub slug from a project's git remote."""
+    result = _run(["git", "-C", str(project_path), "remote", "get-url", "origin"])
+    remote = result.stdout.strip()
+    if "github.com" in remote:
+        return remote.split("github.com")[-1].strip(":/").replace(".git", "")
+    return project_path.name
+
+
+def add_repo(name_or_path: str) -> dict[str, Any] | None:
+    """Add a repo to the factory (no cloning). Returns the entry or None on failure."""
     config = load_config()
-    projects_base = Path(
-        config.get("projects_base", str(Path.home() / "projects" / "ailuracollective"))
-    )
-    projects_base.mkdir(parents=True, exist_ok=True)
+    default_base = str(Path.home() / "projects" / "ailuracollective")
+    projects_base = Path(config.get("projects_base", default_base))
 
-    # determine github slug
-    if "/" in name_or_url and not name_or_url.startswith("http"):
-        slug = name_or_url
-    else:
-        slug = (
-            name_or_url.rstrip("/").split("github.com/")[-1].replace(".git", "")
-            if "github.com" in name_or_url
-            else name_or_url
-        )
-    name = slug.split("/")[-1]
-
-    project_path = clone_repo(slug, projects_base)
+    project_path = resolve_project_path(name_or_path, projects_base)
     if project_path is None:
         return None
 
-    register_t3(project_path)
+    slug = _detect_slug(project_path)
+    name = slug.split("/")[-1]
 
+    register_t3(project_path)
     sync_labels(slug)
 
     entry = {
@@ -136,7 +129,6 @@ def remove_repo(name: str) -> bool:
     repo = get_repo(config, name)
     if repo is None:
         return False
-    # remove webhook
     hook_id = repo.get("hook_id")
     github = repo.get("github")
     if hook_id and github:

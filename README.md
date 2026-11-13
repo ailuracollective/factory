@@ -30,7 +30,7 @@ with the secret from `factory init`.
 | Command | Description |
 |---|---|
 | `factory init [--force]` | Initialize config |
-| `factory repo add <repo>` | Register a repo (clone, labels, T3, webhook) |
+| `factory repo add <path-or-name>` | Register an existing repo (labels, T3, webhook) |
 | `factory repo list` | List repos |
 | `factory repo remove <name>` | Unregister a repo |
 | `factory repo sync <name>` | Re-apply labels from standards |
