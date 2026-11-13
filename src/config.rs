@@ -16,12 +16,18 @@ fn default_bind() -> String {
     "0.0.0.0".to_string()
 }
 
+fn default_max_attempts() -> u32 {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Defaults {
     pub provider: String,
     pub model: String,
     pub base_branch: String,
     pub label: String,
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +71,7 @@ impl Default for Config {
                 model: "opencode-go/beam-free".to_string(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
+                max_attempts: 3,
             },
             repos: Vec::new(),
         }
