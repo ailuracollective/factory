@@ -6,8 +6,14 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
     pub port: u16,
+    #[serde(default = "default_bind")]
+    pub bind: String,
     pub secret: String,
     pub funnel_url: String,
+}
+
+fn default_bind() -> String {
+    "0.0.0.0".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +56,7 @@ impl Default for Config {
                 .to_string(),
             webhook: WebhookConfig {
                 port: 8787,
+                bind: "0.0.0.0".to_string(),
                 secret: String::new(),
                 funnel_url: String::new(),
             },
@@ -72,6 +79,11 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_file() -> PathBuf {
+    if let Ok(p) = std::env::var("ISSUE_FACTORY_CONFIG_FILE") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
     config_dir().join("config.json")
 }
 

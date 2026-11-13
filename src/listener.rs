@@ -37,12 +37,19 @@ pub async fn serve(config: Config) -> Result<()> {
     };
 
     let port = state.config.webhook.port;
+    let bind = std::env::var("ISSUE_FACTORY_WEBHOOK_BIND")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| state.config.webhook.bind.clone());
     let app = Router::new()
         .route("/health", get(health))
         .route("/", post(webhook))
         .with_state(state.clone());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let ip: std::net::IpAddr = bind
+        .parse()
+        .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)));
+    let addr = SocketAddr::new(ip, port);
     tracing::info!(
         "Webhook listener on http://0.0.0.0:{} (secret={})",
         port,

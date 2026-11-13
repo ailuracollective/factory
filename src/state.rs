@@ -11,6 +11,11 @@ pub struct State {
 }
 
 pub fn state_file() -> PathBuf {
+    if let Ok(p) = std::env::var("ISSUE_FACTORY_STATE_FILE") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
     dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
         .join("ailuracollective")
