@@ -85,6 +85,7 @@ enum SecretAction {
 }
 
 fn main() -> ExitCode {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     let result = match cli.command {
         Commands::Init { force } => cli::init(force),

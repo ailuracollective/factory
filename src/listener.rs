@@ -158,12 +158,19 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
 
     let key = format!("{}#{}", repo, number);
 
-    // check processed
+    // check + reserve processed (before launching to avoid races)
     {
-        let proc = state.processed.lock().unwrap();
+        let mut proc = state.processed.lock().unwrap();
         if proc.contains(&key) {
             return format!("ignored: already processed {}", key);
         }
+        proc.push(key.clone());
+    }
+    // save state (reserved)
+    {
+        let p = state.processed.lock().unwrap();
+        let t = state.threads.lock().unwrap();
+        let _ = save_state(&p, &t);
     }
 
     // resolve project path
@@ -182,26 +189,24 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
     }
     let project = project.unwrap();
     if !project.exists() {
+        // un-reserve
+        let mut proc = state.processed.lock().unwrap();
+        proc.retain(|k| k != &key);
+        let p = state.processed.lock().unwrap();
+        let t = state.threads.lock().unwrap();
+        let _ = save_state(&p, &t);
         return format!("ignored: no project for {}", repo);
     }
 
     let thread_id = launch_agent(&issue, &project, &state.config);
 
-    {
-        let mut proc = state.processed.lock().unwrap();
-        proc.push(key.clone());
-    }
     if let Some(ref id) = thread_id {
         let mut thr = state.threads.lock().unwrap();
         thr.insert(key.clone(), id.clone());
-    }
-    // save state
-    let (proc_snap, thr_snap) = {
         let p = state.processed.lock().unwrap();
         let t = state.threads.lock().unwrap();
-        (p.clone(), t.clone())
-    };
-    let _ = save_state(&proc_snap, &thr_snap);
+        let _ = save_state(&p, &t);
+    }
 
     match thread_id {
         Some(_) => format!("launched {}", key),
