@@ -1,0 +1,9 @@
+# Copy to `.dev.vars` for local development. Never commit real values.
+GITHUB_WEBHOOK_SECRET=local-dev-webhook-secret
+GITHUB_TOKEN=github_pat_local_dev_placeholder
+ADMIN_TOKEN=local-dev-admin-token
+RUNNER_BOOTSTRAP_SECRET=local-dev-bootstrap-secret
+# Optional: comma-separated allowlist of repositories Factory may enqueue.
+GITHUB_ALLOWED_REPOS=owner/repo
+# Optional: pin the GitHub App installation id accepted by the webhook.
+GITHUB_INSTALLATION_ID=123456

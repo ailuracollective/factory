@@ -36,7 +36,8 @@ GitHub -> Gateway webhook -> authorize -> persist job (D1) -> CLI polls/claims j
 
 ## Security
 
+- Gateway fails closed on missing or invalid authentication configuration; see [gateway-security.md](gateway-security.md).
 - Webhook signatures mandatory in gateway.
-- Runner auth via revocable tokens.
+- Runner auth via CSPRNG tokens stored as hashes, with revocation and rotation.
 - No auto-merge/deploy in MVP.
 - Treat issue/PR content as untrusted.
