@@ -21,7 +21,11 @@ fn slugify(text: &str) -> String {
 
 pub fn build_prompt(issue: &Value) -> String {
     let number = issue.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
-    let url = issue.get("url").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let url = issue
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     format!(
         "Resolve GitHub issue #{number}: {url}\n\nRead the issue via `gh issue view {number}` for full details.\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Run the project test suite and linters before finishing.\n- Open a pull request that references the issue (Closes #{number}).\n- Do not merge the pull request.\n",
         number = number,
@@ -29,9 +33,18 @@ pub fn build_prompt(issue: &Value) -> String {
     )
 }
 
-pub fn launch_agent(issue: &Value, project: &Path, config: &Config, prompt: Option<&str>) -> Option<String> {
+pub fn launch_agent(
+    issue: &Value,
+    project: &Path,
+    config: &Config,
+    prompt: Option<&str>,
+) -> Option<String> {
     let number = issue.get("number").and_then(|v| v.as_i64())?;
-    let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let title = issue
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     let branch = format!("issue-{}-{}", number, slugify(title));
     let thread_title = format!("Fix issue #{}: {}", number, title);
     let thread_title = if thread_title.len() > 80 {
@@ -45,9 +58,11 @@ pub fn launch_agent(issue: &Value, project: &Path, config: &Config, prompt: Opti
     };
 
     let defaults = &config.defaults;
-    let provider = std::env::var("ISSUE_FACTORY_PROVIDER").unwrap_or_else(|_| defaults.provider.clone());
+    let provider =
+        std::env::var("ISSUE_FACTORY_PROVIDER").unwrap_or_else(|_| defaults.provider.clone());
     let model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
-    let base_branch = std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| defaults.base_branch.clone());
+    let base_branch =
+        std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| defaults.base_branch.clone());
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
 
     let mut cmd = Command::new(&t3_bin);
@@ -68,7 +83,11 @@ pub fn launch_agent(issue: &Value, project: &Path, config: &Config, prompt: Opti
         .arg("--json")
         .current_dir(project);
 
-    tracing::info!("Launching agent for issue #{} in {}", number, project.display());
+    tracing::info!(
+        "Launching agent for issue #{} in {}",
+        number,
+        project.display()
+    );
 
     let output = match cmd.output() {
         Ok(o) => o,
@@ -120,5 +139,39 @@ fn parse_thread_id(output: &str) -> Option<String> {
             return Some(s.to_string());
         }
     }
-    text.lines().next().map(|l| l.trim().to_string()).filter(|s| !s.is_empty())
+    text.lines()
+        .next()
+        .map(|l| l.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn slugify_basic() {
+        assert_eq!(slugify("Fix Bug!"), "fix-bug");
+        assert_eq!(slugify("   "), "issue");
+    }
+
+    #[test]
+    fn build_prompt_contains_fields() {
+        let issue = json!({
+            "number": 7,
+            "title": "Fix bug",
+            "url": "https://example.com/issue/7"
+        });
+        let p = build_prompt(&issue);
+        assert!(p.contains("issue #7"));
+        assert!(p.contains("https://example.com/issue/7"));
+        assert!(p.contains("Closes #7"));
+    }
+
+    #[test]
+    fn parse_thread_id_json() {
+        let out = r#"{"threadId":"thread-1"}"#;
+        assert_eq!(parse_thread_id(out), Some("thread-1".to_string()));
+    }
 }

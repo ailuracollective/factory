@@ -1,8 +1,8 @@
-use anyhow::Result;
 use crate::config::{get_repo, load_config, save_config};
 use crate::doctor::run_doctor;
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
+use anyhow::Result;
 use std::process::Command;
 use tokio::runtime::Runtime;
 
@@ -29,7 +29,10 @@ pub fn init(force: bool) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = config_file();
     if path.exists() && !force {
-        println!("Config already exists at {}. Use --force to overwrite.", path.display());
+        println!(
+            "Config already exists at {}. Use --force to overwrite.",
+            path.display()
+        );
         return Ok(());
     }
     let mut cfg = Config::default();
@@ -86,10 +89,7 @@ pub fn repo_list() -> Result<()> {
         return Ok(());
     }
     for r in repos {
-        println!(
-            "{:30} {:40} enabled={}",
-            r.name, r.github, r.enabled
-        );
+        println!("{:30} {:40} enabled={}", r.name, r.github, r.enabled);
     }
     Ok(())
 }
@@ -139,7 +139,14 @@ pub fn stop() -> Result<()> {
     if code == 0 {
         println!("Factory stopped.");
     } else {
-        println!("{}", if msg.is_empty() { "Failed to stop." } else { &msg });
+        println!(
+            "{}",
+            if msg.is_empty() {
+                "Failed to stop."
+            } else {
+                &msg
+            }
+        );
     }
     Ok(())
 }
@@ -149,7 +156,14 @@ pub fn restart() -> Result<()> {
     if code == 0 {
         println!("Factory restarted.");
     } else {
-        println!("{}", if msg.is_empty() { "Failed to restart." } else { &msg });
+        println!(
+            "{}",
+            if msg.is_empty() {
+                "Failed to restart."
+            } else {
+                &msg
+            }
+        );
     }
     Ok(())
 }
@@ -170,7 +184,10 @@ pub fn status() -> Result<()> {
     let config = load_config()?;
     println!("Repos: {}", config.repos.len());
     for repo in &config.repos {
-        println!("  - {} ({}) enabled={}", repo.name, repo.github, repo.enabled);
+        println!(
+            "  - {} ({}) enabled={}",
+            repo.name, repo.github, repo.enabled
+        );
     }
     let url = &config.webhook.funnel_url;
     if !url.is_empty() {
@@ -189,7 +206,9 @@ pub fn secret_rotate() -> Result<()> {
         let github = repo.github.clone();
         if let Some(hook_id) = repo.hook_id {
             if !github.is_empty() && !url.is_empty() {
-                let ok = crate::webhook_manager::update_webhook(&github, hook_id, &url, &new_secret).unwrap_or(false);
+                let ok =
+                    crate::webhook_manager::update_webhook(&github, hook_id, &url, &new_secret)
+                        .unwrap_or(false);
                 println!("  {}: {}", github, if ok { "updated" } else { "FAILED" });
             }
         }
@@ -201,7 +220,10 @@ pub fn secret_rotate() -> Result<()> {
     if service.exists() {
         let text = std::fs::read_to_string(&service)?;
         let re = regex::Regex::new(r"Environment=ISSUE_FACTORY_WEBHOOK_SECRET=.*").unwrap();
-        let new_text = re.replace(&text, format!("Environment=ISSUE_FACTORY_WEBHOOK_SECRET={}", new_secret));
+        let new_text = re.replace(
+            &text,
+            format!("Environment=ISSUE_FACTORY_WEBHOOK_SECRET={}", new_secret),
+        );
         std::fs::write(&service, new_text.to_string())?;
         run(&["systemctl", "--user", "daemon-reload"]);
         run(&["systemctl", "--user", "restart", "factory"]);
@@ -213,7 +235,15 @@ pub fn secret_rotate() -> Result<()> {
 
 pub fn logs(follow: bool, lines: u32) -> Result<()> {
     let n = lines.to_string();
-    let mut args = vec!["journalctl", "--user", "-u", "factory", "--no-pager", "-n", n.as_str()];
+    let mut args = vec![
+        "journalctl",
+        "--user",
+        "-u",
+        "factory",
+        "--no-pager",
+        "-n",
+        n.as_str(),
+    ];
     if follow {
         args = vec!["journalctl", "--user", "-u", "factory", "-f"];
     }
@@ -241,18 +271,16 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
         println!("Project path not found: {}", project.display());
         return Ok(());
     }
-    let (code, out) = run(
-        &[
-            "gh",
-            "issue",
-            "view",
-            &issue.to_string(),
-            "--repo",
-            &repo_entry.github,
-            "--json",
-            "number,title,body,url,labels",
-        ],
-    );
+    let (code, out) = run(&[
+        "gh",
+        "issue",
+        "view",
+        &issue.to_string(),
+        "--repo",
+        &repo_entry.github,
+        "--json",
+        "number,title,body,url,labels",
+    ]);
     if code != 0 {
         println!("Failed to fetch issue: {}", out);
         return Ok(());

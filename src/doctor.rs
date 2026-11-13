@@ -6,7 +6,11 @@ fn run(cmd: &[&str]) -> (i32, String) {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
             let err = String::from_utf8_lossy(&o.stderr);
-            let msg = if out.trim().is_empty() { err.trim().to_string() } else { out.trim().to_string() };
+            let msg = if out.trim().is_empty() {
+                err.trim().to_string()
+            } else {
+                out.trim().to_string()
+            };
             let msg = msg.lines().next().unwrap_or("").to_string();
             (o.status.code().unwrap_or(1), msg)
         }
@@ -33,7 +37,11 @@ pub fn run_doctor() -> Result<()> {
         let url = format!("{}/health", cfg.webhook.funnel_url.trim_end_matches('/'));
         let (_code, msg) = run(&["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", &url]);
         let ok = msg == "200";
-        println!("[{}] funnel reachable: {}", if ok { "OK" } else { "FAIL" }, msg);
+        println!(
+            "[{}] funnel reachable: {}",
+            if ok { "OK" } else { "FAIL" },
+            msg
+        );
     }
     let failed = checks.iter().any(|(_, (c, _))| *c != 0);
     if failed {

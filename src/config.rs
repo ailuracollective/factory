@@ -95,9 +95,15 @@ pub fn save_config(cfg: &Config) -> Result<()> {
 }
 
 pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
-    config.repos.iter().find(|r| r.name == name || r.github == name)
+    config
+        .repos
+        .iter()
+        .find(|r| r.name == name || r.github == name)
 }
 
 pub fn get_repo_mut<'a>(config: &'a mut Config, name: &str) -> Option<&'a mut RepoEntry> {
-    config.repos.iter_mut().find(|r| r.name == name || r.github == name)
+    config
+        .repos
+        .iter_mut()
+        .find(|r| r.name == name || r.github == name)
 }

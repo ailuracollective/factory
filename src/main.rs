@@ -11,7 +11,12 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(name = "factory", version, about = "AI Factory CLI", disable_help_subcommand = true)]
+#[command(
+    name = "factory",
+    version,
+    about = "AI Factory CLI",
+    disable_help_subcommand = true
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -113,7 +118,11 @@ fn main() -> ExitCode {
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor => cli::doctor(),
         Commands::Listen { port } => cli::listen(port),
-        Commands::Test { repo, issue, prompt } => cli::test(&repo, issue, prompt),
+        Commands::Test {
+            repo,
+            issue,
+            prompt,
+        } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
     };
     match result {

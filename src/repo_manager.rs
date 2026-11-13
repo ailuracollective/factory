@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::config::{get_repo, load_config, save_config, RepoEntry};
+use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -14,7 +14,11 @@ fn run(cmd: &[&str], cwd: Option<&std::path::Path>) -> (i32, String) {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
             let err = String::from_utf8_lossy(&o.stderr);
-            let msg = if out.trim().is_empty() { err.trim().to_string() } else { out.trim().to_string() };
+            let msg = if out.trim().is_empty() {
+                err.trim().to_string()
+            } else {
+                out.trim().to_string()
+            };
             (o.status.code().unwrap_or(1), msg)
         }
         Err(_) => (127, "not found".to_string()),
@@ -41,12 +45,16 @@ pub fn resolve_project_path(name_or_path: &str, projects_base: &PathBuf) -> Opti
 
 pub fn register_t3(project_path: &PathBuf) -> bool {
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
-    let (code, _) = run(&[&t3_bin, "project", "add", project_path.to_str().unwrap()], None);
+    let (code, _) = run(
+        &[&t3_bin, "project", "add", project_path.to_str().unwrap()],
+        None,
+    );
     code == 0
 }
 
 pub fn sync_labels(repo_slug: &str) -> u32 {
-    let url = "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml";
+    let url =
+        "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml";
     let labels_file = std::env::temp_dir().join("labels.yml");
     // download
     let status = Command::new("curl")
@@ -73,11 +81,33 @@ pub fn sync_labels(repo_slug: &str) -> u32 {
         let color = cap.get(2).unwrap().as_str();
         let desc = cap.get(3).unwrap().as_str();
         run(
-            &["gh", "label", "create", name, "--color", color, "--description", desc, "--repo", repo_slug],
+            &[
+                "gh",
+                "label",
+                "create",
+                name,
+                "--color",
+                color,
+                "--description",
+                desc,
+                "--repo",
+                repo_slug,
+            ],
             None,
         );
         run(
-            &["gh", "label", "edit", name, "--color", color, "--description", desc, "--repo", repo_slug],
+            &[
+                "gh",
+                "label",
+                "edit",
+                name,
+                "--color",
+                color,
+                "--description",
+                desc,
+                "--repo",
+                repo_slug,
+            ],
             None,
         );
         count += 1;
@@ -93,7 +123,14 @@ pub fn add_repo(name_or_path: &str) -> Option<RepoEntry> {
     let project_path = resolve_project_path(name_or_path, &projects_base)?;
     // detect slug from git remote
     let (_, remote) = run(
-        &["git", "-C", project_path.to_str().unwrap(), "remote", "get-url", "origin"],
+        &[
+            "git",
+            "-C",
+            project_path.to_str().unwrap(),
+            "remote",
+            "get-url",
+            "origin",
+        ],
         None,
     );
     let slug = if remote.contains("github.com") {

@@ -6,11 +6,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use std::net::{IpAddr, SocketAddr};
 use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
@@ -43,10 +43,18 @@ pub async fn serve(config: Config) -> Result<()> {
         .with_state(state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Webhook listener on http://0.0.0.0:{} (secret={})", port, !state.config.webhook.secret.is_empty());
+    tracing::info!(
+        "Webhook listener on http://0.0.0.0:{} (secret={})",
+        port,
+        !state.config.webhook.secret.is_empty()
+    );
 
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -62,7 +70,10 @@ async fn webhook(
 ) -> (StatusCode, Json<serde_json::Value>) {
     // IP allowlist (GitHub hooks + localhost + Tailscale)
     if !is_allowed_ip(addr.ip()) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "ip not allowed"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "ip not allowed"})),
+        );
     }
     // verify signature
     let secret = &state.config.webhook.secret;
@@ -71,7 +82,10 @@ async fn webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !verify_signature(secret, body.as_bytes(), sig_header) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "bad signature"})));
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "bad signature"})),
+        );
     }
 
     let event = headers
@@ -79,15 +93,26 @@ async fn webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !event.is_empty() && event != "issues" {
-        return (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "ignored", "reason": format!("event={}", event)})));
+        return (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({"status": "ignored", "reason": format!("event={}", event)})),
+        );
     }
 
     let payload: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid json"}))),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid json"})),
+            )
+        }
     };
     if !payload.is_object() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid payload"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "invalid payload"})),
+        );
     }
 
     // spawn background task
@@ -97,7 +122,10 @@ async fn webhook(
         tracing::info!("webhook result: {}", status);
     });
 
-    (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "accepted"})))
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"status": "accepted"})),
+    )
 }
 
 fn verify_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
@@ -127,7 +155,11 @@ fn verify_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
 }
 
 async fn handle_payload(state: AppState, payload: Value) -> String {
-    let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let action = payload
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let issue = match payload.get("issue") {
         Some(i) if i.is_object() => i.clone(),
         _ => return "ignored: no issue".to_string(),
@@ -246,6 +278,47 @@ fn is_allowed_ip(ip: IpAddr) -> bool {
             false
         }
         IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn verify_signature_empty_secret() {
+        assert!(verify_signature("", b"hello", ""));
+    }
+
+    #[test]
+    fn verify_signature_rejects_bad() {
+        assert!(!verify_signature("secret", b"hello", "sha256=deadbeef"));
+    }
+
+    #[test]
+    fn issue_matches_label_labeled() {
+        let issue = json!({"labels": []});
+        let payload = json!({"label": {"name": "status/ready"}});
+        assert!(issue_matches_label(
+            "status/ready",
+            &issue,
+            "labeled",
+            &payload
+        ));
+    }
+
+    #[test]
+    fn issue_matches_label_opened() {
+        let issue = json!({"labels": [{"name": "status/ready"}, {"name": "ai"}]});
+        let payload = json!({});
+        assert!(issue_matches_label(
+            "status/ready",
+            &issue,
+            "opened",
+            &payload
+        ));
+        assert!(!issue_matches_label("other", &issue, "opened", &payload));
     }
 }
 

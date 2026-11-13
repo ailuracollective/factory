@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::config::{get_repo, get_repo_mut, load_config, save_config};
+use anyhow::Result;
 use std::process::Command;
 
 fn run(cmd: &[String]) -> (i32, String) {
@@ -79,7 +79,13 @@ pub fn update_webhook(repo_slug: &str, hook_id: u64, url: &str, secret: &str) ->
 
 pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
     let path = format!("repos/{}/hooks/{}", repo_slug, hook_id);
-    let (code, _) = run(&["gh".to_string(), "api".to_string(), path, "-X".to_string(), "DELETE".to_string()]);
+    let (code, _) = run(&[
+        "gh".to_string(),
+        "api".to_string(),
+        path,
+        "-X".to_string(),
+        "DELETE".to_string(),
+    ]);
     Ok(code == 0)
 }
 
