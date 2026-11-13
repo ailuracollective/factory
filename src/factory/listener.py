@@ -209,3 +209,7 @@ def main() -> None:
             "ISSUE_FACTORY_WEBHOOK_SECRET not set; accepting unsigned payloads (dev only)"
         )
     serve_webhook(config)
+
+
+if __name__ == "__main__":
+    main()
