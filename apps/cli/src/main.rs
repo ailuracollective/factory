@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod doctor;
 mod listener;
+mod mentions;
 mod repo_manager;
 mod state;
 mod webhook_manager;
@@ -63,6 +64,13 @@ enum Commands {
     Listen {
         #[arg(long)]
         port: Option<u16>,
+    },
+    /// Poll GitHub for configured mentions and dispatch authorized work
+    Mentions {
+        #[arg(long)]
+        once: bool,
+        #[arg(long)]
+        interval: Option<u64>,
     },
     /// Register this runner with a gateway
     Connect {
@@ -136,6 +144,7 @@ fn main() -> ExitCode {
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor => cli::doctor(),
         Commands::Listen { port } => cli::listen(port),
+        Commands::Mentions { once, interval } => cli::mentions(once, interval),
         Commands::Connect {
             gateway,
             runner,

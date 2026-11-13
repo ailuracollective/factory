@@ -176,6 +176,46 @@ pub fn listen(port: Option<u16>) -> Result<()> {
     rt.block_on(crate::listener::serve(config))
 }
 
+pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
+    use crate::mentions::{AgentDispatcher, Engine, GhAuthorizer, GhEventSource, SqliteEventStore};
+
+    let config = load_config()?;
+    if !config.mentions.enabled {
+        println!("Mentions are disabled. Set mentions.enabled=true in the config.");
+        return Ok(());
+    }
+    if config.mentions.usernames.is_empty() {
+        println!("No trigger usernames configured. Set mentions.usernames in the config.");
+        return Ok(());
+    }
+    let store = SqliteEventStore;
+    let mut source = GhEventSource;
+    loop {
+        // Reload config each poll so username/policy changes apply without a restart.
+        let config = load_config()?;
+        let interval = interval
+            .unwrap_or(config.mentions.poll_interval_secs)
+            .max(5);
+        let dispatcher = AgentDispatcher { config: &config };
+        let authorizer = GhAuthorizer;
+        let engine = Engine::new(&config, &store, &dispatcher, &authorizer);
+        match engine.poll(&mut source, crate::state::now()) {
+            Ok(summary) => tracing::info!(
+                ignored = summary.ignored,
+                rejected = summary.rejected,
+                launched = summary.launched,
+                failed = summary.failed,
+                "mention poll complete"
+            ),
+            Err(e) => tracing::error!("mention poll failed: {e}"),
+        }
+        if once {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(interval));
+    }
+}
+
 pub fn status() -> Result<()> {
     let (code, msg) = run(&["systemctl", "--user", "is-active", "factory"]);
     println!("Daemon: {}", if msg.is_empty() { "unknown" } else { &msg });
@@ -355,7 +395,7 @@ pub fn connect(gateway: &str, runner: &str, bootstrap_secret: Option<&str>) -> R
     Ok(())
 }
 
-fn encode_path_segment(s: &str) -> String {
+pub(crate) fn encode_path_segment(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

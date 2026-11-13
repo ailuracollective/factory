@@ -173,6 +173,22 @@ async fn connect(path: &PathBuf) -> Result<DatabaseConnection> {
     )";
     db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
         .await?;
+    let sql = "CREATE TABLE IF NOT EXISTS mention_events (
+        event_key TEXT PRIMARY KEY NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )";
+    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
+    let sql = "CREATE TABLE IF NOT EXISTS mention_cursors (
+        repo TEXT PRIMARY KEY NOT NULL,
+        cursor TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+    )";
+    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
+        .await?;
     Ok(db)
 }
 
@@ -346,6 +362,111 @@ pub fn save_state(issues: &HashMap<String, IssueState>) -> Result<()> {
     let path = state_file();
     let issues = issues.clone();
     run_async(save_state_db(path, issues))
+}
+
+async fn mention_cursor_db(path: PathBuf, repo: String) -> Result<Option<String>> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT cursor FROM mention_cursors WHERE repo = ?",
+        [repo.into()],
+    );
+    let row = db.query_one_raw(stmt).await?;
+    Ok(row.and_then(|r| r.try_get::<String>("", "cursor").ok()))
+}
+
+pub fn mention_cursor(repo: &str) -> Option<String> {
+    let path = state_file();
+    run_async(mention_cursor_db(path, repo.to_string()))
+        .ok()
+        .flatten()
+}
+
+async fn set_mention_cursor_db(path: PathBuf, repo: String, cursor: String) -> Result<()> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT INTO mention_cursors (repo, cursor, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(repo) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
+        [repo.into(), cursor.into(), (now() as i64).into()],
+    );
+    db.execute_raw(stmt).await?;
+    Ok(())
+}
+
+pub fn set_mention_cursor(repo: &str, cursor: &str) -> Result<()> {
+    let path = state_file();
+    run_async(set_mention_cursor_db(
+        path,
+        repo.to_string(),
+        cursor.to_string(),
+    ))
+}
+
+async fn mention_event_seen_db(path: PathBuf, key: String) -> Result<bool> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT 1 FROM mention_events WHERE event_key = ?",
+        [key.into()],
+    );
+    Ok(db.query_one_raw(stmt).await?.is_some())
+}
+
+pub fn mention_event_seen(key: &str) -> bool {
+    let path = state_file();
+    run_async(mention_event_seen_db(path, key.to_string())).unwrap_or(false)
+}
+
+async fn record_mention_event_db(
+    path: PathBuf,
+    key: String,
+    status: String,
+    detail: String,
+) -> Result<()> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT INTO mention_events (event_key, status, detail, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(event_key) DO UPDATE SET status = excluded.status, detail = excluded.detail, updated_at = excluded.updated_at",
+        [
+            key.into(),
+            status.into(),
+            detail.into(),
+            (now() as i64).into(),
+            (now() as i64).into(),
+        ],
+    );
+    db.execute_raw(stmt).await?;
+    Ok(())
+}
+
+pub fn record_mention_event(key: &str, status: &str, detail: &str) -> Result<()> {
+    let path = state_file();
+    run_async(record_mention_event_db(
+        path,
+        key.to_string(),
+        status.to_string(),
+        detail.to_string(),
+    ))
+}
+
+async fn count_mention_launches_db(path: PathBuf, since: i64) -> Result<usize> {
+    let db = connect(&path).await?;
+    let stmt = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT COUNT(*) AS c FROM mention_events WHERE status IN ('accepted', 'completed') AND created_at >= ?",
+        [since.into()],
+    );
+    let row = db.query_one_raw(stmt).await?;
+    let count: i64 = row.and_then(|r| r.try_get("", "c").ok()).unwrap_or(0);
+    Ok(count.max(0) as usize)
+}
+
+pub fn count_mention_launches_since(since: u64) -> usize {
+    let path = state_file();
+    run_async(count_mention_launches_db(path, since as i64)).unwrap_or(0)
 }
 
 #[cfg(test)]
