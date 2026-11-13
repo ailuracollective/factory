@@ -21,30 +21,15 @@ fn slugify(text: &str) -> String {
 
 pub fn build_prompt(issue: &Value) -> String {
     let number = issue.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
-    let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let body = issue.get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
     let url = issue.get("url").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let labels = issue
-        .get("labels")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|l| l.get("name").and_then(|n| n.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default();
     format!(
-        "Resolve GitHub issue #{number}: {title}\n\nURL: {url}\nLabels: {labels}\n\n## Issue body\n{body}\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Run the project test suite and linters before finishing.\n- Open a pull request that references the issue (Closes #{number}).\n- Do not merge the pull request.\n",
+        "Resolve GitHub issue #{number}: {url}\n\nRead the issue via `gh issue view {number}` for full details.\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Run the project test suite and linters before finishing.\n- Open a pull request that references the issue (Closes #{number}).\n- Do not merge the pull request.\n",
         number = number,
-        title = title,
-        url = url,
-        labels = labels,
-        body = body
+        url = url
     )
 }
 
-pub fn launch_agent(issue: &Value, project: &Path, config: &Config) -> Option<String> {
+pub fn launch_agent(issue: &Value, project: &Path, config: &Config, prompt: Option<&str>) -> Option<String> {
     let number = issue.get("number").and_then(|v| v.as_i64())?;
     let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
     let branch = format!("issue-{}-{}", number, slugify(title));
@@ -54,7 +39,10 @@ pub fn launch_agent(issue: &Value, project: &Path, config: &Config) -> Option<St
     } else {
         thread_title
     };
-    let prompt = build_prompt(issue);
+    let prompt = match prompt {
+        Some(p) if !p.trim().is_empty() => p.to_string(),
+        _ => build_prompt(issue),
+    };
 
     let defaults = &config.defaults;
     let provider = std::env::var("ISSUE_FACTORY_PROVIDER").unwrap_or_else(|_| defaults.provider.clone());

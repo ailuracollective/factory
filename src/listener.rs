@@ -203,7 +203,7 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
         return format!("ignored: no project for {}", repo);
     }
 
-    let thread_id = launch_agent(&issue, &project, &state.config);
+    let thread_id = launch_agent(&issue, &project, &state.config, None);
 
     if let Some(ref id) = thread_id {
         let mut thr = state.threads.lock().unwrap();

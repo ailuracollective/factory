@@ -63,6 +63,14 @@ enum Commands {
     Test {
         repo: String,
         issue: u64,
+        #[arg(long)]
+        prompt: Option<String>,
+    },
+    /// Launch an agent with a custom prompt (no issue)
+    Run {
+        repo: String,
+        #[arg(long)]
+        prompt: String,
     },
 }
 
@@ -105,7 +113,8 @@ fn main() -> ExitCode {
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor => cli::doctor(),
         Commands::Listen { port } => cli::listen(port),
-        Commands::Test { repo, issue } => cli::test(&repo, issue),
+        Commands::Test { repo, issue, prompt } => cli::test(&repo, issue, prompt),
+        Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

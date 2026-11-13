@@ -40,7 +40,8 @@ with the secret from `factory init`.
 | `factory secret rotate` | Rotate webhook secret |
 | `factory logs [-f] [-n N]` | Show/follow daemon logs |
 | `factory doctor` | Run diagnostics |
-| `factory test <repo> <issue#>` | Manually launch an agent for an issue |
+| `factory test <repo> <issue#> [--prompt "..."]` | Manually launch an agent for an issue (optional custom prompt) |
+| `factory run <repo> --prompt "..."` | Launch an agent with a custom prompt (no issue) |
 | `factory listen [--port N]` | Run webhook listener in foreground |
 
 ## How it works

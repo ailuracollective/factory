@@ -227,7 +227,7 @@ pub fn doctor() -> Result<()> {
     crate::doctor::run_doctor()
 }
 
-pub fn test(repo: &str, issue: u64) -> Result<()> {
+pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
     let config = load_config()?;
     let repo_entry = match get_repo(&config, repo) {
         Some(r) => r.clone(),
@@ -264,7 +264,30 @@ pub fn test(repo: &str, issue: u64) -> Result<()> {
             return Ok(());
         }
     };
-    match crate::agent::launch_agent(&issue_data, &project, &config) {
+    match crate::agent::launch_agent(&issue_data, &project, &config, prompt.as_deref()) {
+        Some(tid) => println!("Launched thread: {}", tid),
+        None => println!("Failed to launch agent."),
+    }
+    Ok(())
+}
+
+pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
+    let config = load_config()?;
+    let repo_entry = match get_repo(&config, repo) {
+        Some(r) => r.clone(),
+        None => {
+            println!("Repo not found: {}", repo);
+            return Ok(());
+        }
+    };
+    let project = std::path::PathBuf::from(&repo_entry.path);
+    if !project.exists() {
+        println!("Project path not found: {}", project.display());
+        return Ok(());
+    }
+    // build a minimal issue-like object
+    let issue = serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
+    match crate::agent::launch_agent(&issue, &project, &config, Some(prompt)) {
         Some(tid) => println!("Launched thread: {}", tid),
         None => println!("Failed to launch agent."),
     }
