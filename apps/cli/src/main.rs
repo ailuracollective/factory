@@ -111,8 +111,12 @@ enum SecretAction {
 
 fn main() -> ExitCode {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn"));
-    tracing_subscriber::fmt().pretty().with_env_filter(filter).init();
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn"));
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(filter)
+        .init();
     let cli = Cli::parse();
     let result = match cli.command {
         Commands::Init { force } => cli::init(force),

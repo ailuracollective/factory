@@ -1,5 +1,8 @@
 use anyhow::Result;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, Set, Statement};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, Set,
+    Statement,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

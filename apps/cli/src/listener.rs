@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
-use crate::agent::launch_agent;
 use crate::config::Config;
 use crate::state::{load_state, save_state, IssueState, IssueStatus};
 
@@ -272,7 +271,19 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
         return format!("ignored: no project for {}", repo);
     }
 
-    let thread_id = launch_agent(&issue, &project, &state.config, None);
+    let issue_for_launch = issue.clone();
+    let project_for_launch = project.clone();
+    let config_for_launch = state.config.clone();
+    let thread_id = tokio::task::spawn_blocking(move || {
+        crate::agent::launch_agent(
+            &issue_for_launch,
+            &project_for_launch,
+            &config_for_launch,
+            None,
+        )
+    })
+    .await
+    .unwrap_or(None);
 
     {
         let mut issues = state.issues.lock().unwrap();

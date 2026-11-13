@@ -80,6 +80,7 @@ pub fn launch_agent(
         .arg(&base_branch)
         .arg("--branch")
         .arg(&branch)
+        .arg("--wait")
         .arg("--json")
         .current_dir(project);
 
