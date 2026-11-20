@@ -9,8 +9,14 @@
     "gateway:build": "pnpm --filter gateway build",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "fmt": "pnpm -r fmt",
-    "fmt:check": "pnpm -r fmt:check",
-    "clippy": "pnpm -r clippy"
+    "clippy": "pnpm -r clippy",
+    "prepare": "husky",
+    "lint": "pnpm format && pnpm clippy",
+    "lint:check": "pnpm format:check && pnpm clippy",
+    "format": "pnpm -r format",
+    "format:check": "pnpm -r format:check"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
   }
 }

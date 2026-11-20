@@ -18,7 +18,10 @@ Ailura Factory is a monorepo for AI-assisted development automation.
 Rust (via pnpm workspace):
 ```bash
 pnpm install
-pnpm fmt:check
+pnpm lint
+pnpm lint:check
+pnpm format
+pnpm format:check
 pnpm clippy
 pnpm build
 pnpm test
