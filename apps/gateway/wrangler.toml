@@ -9,7 +9,6 @@ command = "cargo install -q worker-build && worker-build --release"
 binding = "DB"
 database_name = "ailura-factory"
 database_id = "00000000-0000-0000-0000-000000000000"
-migrations_dir = "migrations"
 
 # Secrets are never committed. Set them with:
 #   wrangler secret put GITHUB_WEBHOOK_SECRET

@@ -1,0 +1,23 @@
+#[cfg(target_arch = "wasm32")]
+pub mod audit;
+#[cfg(target_arch = "wasm32")]
+pub mod db;
+#[cfg(target_arch = "wasm32")]
+pub mod env;
+#[cfg(target_arch = "wasm32")]
+pub mod http;
+#[cfg(target_arch = "wasm32")]
+pub mod sea;
+#[cfg(target_arch = "wasm32")]
+pub mod time;
+
+#[cfg(target_arch = "wasm32")]
+pub use audit::*;
+#[cfg(target_arch = "wasm32")]
+pub use db::*;
+#[cfg(target_arch = "wasm32")]
+pub use env::*;
+#[cfg(target_arch = "wasm32")]
+pub use http::*;
+#[cfg(target_arch = "wasm32")]
+pub use time::*;
