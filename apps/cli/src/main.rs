@@ -1,14 +1,5 @@
-mod agent;
-mod cli;
-mod config;
-mod doctor;
-mod listener;
-mod mentions;
-mod repo_manager;
-mod state;
-mod webhook_manager;
-
 use clap::{Parser, Subcommand};
+use factory::cli;
 use std::process::ExitCode;
 
 #[derive(Parser)]
