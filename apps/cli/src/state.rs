@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sea_orm::{
-    ActiveModelTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, Set,
-    Statement,
+    sea_query::OnConflict, ActiveModelTrait, ColumnTrait, ConnectionTrait, Database,
+    DatabaseConnection, DbBackend, EntityTrait, PaginatorTrait, QueryFilter, Schema, Set,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,7 +35,78 @@ mod issue_store {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+mod project_store {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "projects")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        #[sea_orm(unique)]
+        pub name: String,
+        pub path: String,
+        pub github: String,
+        pub hook_id: Option<i64>,
+        pub enabled: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+mod mention_event_store {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "mention_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub event_key: String,
+        pub status: String,
+        pub detail: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+mod mention_cursor_store {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "mention_cursors")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub repo: String,
+        pub cursor: String,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 use issue_store::{ActiveModel as IssueActiveModel, Entity as IssueEntity};
+use mention_cursor_store::{
+    ActiveModel as MentionCursorActiveModel, Column as MentionCursorColumn,
+    Entity as MentionCursorEntity,
+};
+use mention_event_store::{
+    ActiveModel as MentionEventActiveModel, Column as MentionEventColumn,
+    Entity as MentionEventEntity,
+};
+use project_store::{
+    ActiveModel as ProjectActiveModel, Column as ProjectColumn, Entity as ProjectEntity,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -117,11 +188,11 @@ pub fn state_file() -> PathBuf {
         .join("factory.db")
 }
 
-fn db_url(path: &PathBuf) -> String {
+fn db_url(path: &std::path::Path) -> String {
     format!("sqlite://{}?mode=rwc", path.display())
 }
 
-fn ensure_parent(path: &PathBuf) {
+fn ensure_parent(path: &std::path::Path) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -141,54 +212,22 @@ where
     })
 }
 
-async fn connect(path: &PathBuf) -> Result<DatabaseConnection> {
+async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
     ensure_parent(path);
     let db = Database::connect(db_url(path)).await?;
     // Remove legacy config table if present.
-    let _ = db
-        .execute_raw(Statement::from_string(
-            DbBackend::Sqlite,
-            "DROP TABLE IF EXISTS config",
-        ))
-        .await;
-    let sql = "CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY NOT NULL,
-        name TEXT NOT NULL UNIQUE,
-        path TEXT NOT NULL,
-        github TEXT NOT NULL,
-        hook_id INTEGER,
-        enabled INTEGER NOT NULL DEFAULT 1
-    )";
-    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
-        .await?;
-    let sql = "CREATE TABLE IF NOT EXISTS issues (
-        id TEXT PRIMARY KEY NOT NULL,
-        project_id TEXT,
-        issue_key TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        thread_id TEXT,
-        updated_at INTEGER NOT NULL
-    )";
-    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
-        .await?;
-    let sql = "CREATE TABLE IF NOT EXISTS mention_events (
-        event_key TEXT PRIMARY KEY NOT NULL,
-        status TEXT NOT NULL,
-        detail TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-    )";
-    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
-        .await?;
-    let sql = "CREATE TABLE IF NOT EXISTS mention_cursors (
-        repo TEXT PRIMARY KEY NOT NULL,
-        cursor TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-    )";
-    db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql))
-        .await?;
+    let _ = db.execute_unprepared("DROP TABLE IF EXISTS config").await;
+    let schema = Schema::new(DbBackend::Sqlite);
+    for stmt in [
+        schema.create_table_from_entity(ProjectEntity),
+        schema.create_table_from_entity(IssueEntity),
+        schema.create_table_from_entity(MentionEventEntity),
+        schema.create_table_from_entity(MentionCursorEntity),
+    ] {
+        let mut stmt = stmt;
+        stmt.if_not_exists();
+        db.execute(&stmt).await?;
+    }
     Ok(db)
 }
 
@@ -205,54 +244,33 @@ pub fn load_projects() -> Vec<crate::config::RepoEntry> {
 
 async fn load_projects_db(path: PathBuf) -> Result<Vec<crate::config::RepoEntry>> {
     let db = connect(&path).await?;
-    let rows = db
-        .query_all_raw(Statement::from_string(
-            DbBackend::Sqlite,
-            "SELECT name, path, github, hook_id, enabled FROM projects",
-        ))
-        .await
-        .unwrap_or_default();
-    let mut repos = Vec::new();
-    for row in rows {
-        let name: String = row.try_get("", "name").unwrap_or_default();
-        let path: String = row.try_get("", "path").unwrap_or_default();
-        let github: String = row.try_get("", "github").unwrap_or_default();
-        let hook_id: Option<i64> = row.try_get("", "hook_id").ok();
-        let enabled: i64 = row.try_get("", "enabled").unwrap_or(1);
-        repos.push(crate::config::RepoEntry {
-            name,
-            path,
-            github,
-            hook_id: hook_id.map(|v| v as u64),
-            enabled: enabled != 0,
-        });
-    }
-    Ok(repos)
+    let rows = ProjectEntity::find().all(&db).await.unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::config::RepoEntry {
+            name: r.name,
+            path: r.path,
+            github: r.github,
+            hook_id: r.hook_id.map(|v| v as u64),
+            enabled: r.enabled != 0,
+        })
+        .collect())
 }
 
 async fn sync_projects_db(path: PathBuf, repos: Vec<crate::config::RepoEntry>) -> Result<()> {
     let db = connect(&path).await?;
-    // clear
-    db.execute_raw(Statement::from_string(
-        DbBackend::Sqlite,
-        "DELETE FROM projects",
-    ))
-    .await?;
+    ProjectEntity::delete_many().exec(&db).await?;
     for r in repos {
-        let id = Uuid::now_v7();
-        let stmt = Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "INSERT INTO projects (id, name, path, github, hook_id, enabled) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                id.to_string().into(),
-                r.name.into(),
-                r.path.into(),
-                r.github.into(),
-                r.hook_id.map(|v| v as i64).into(),
-                (if r.enabled { 1i64 } else { 0i64 }).into(),
-            ],
-        );
-        db.execute_raw(stmt).await?;
+        ProjectActiveModel {
+            id: Set(Uuid::now_v7().to_string()),
+            name: Set(r.name),
+            path: Set(r.path),
+            github: Set(r.github),
+            hook_id: Set(r.hook_id.map(|v| v as i64)),
+            enabled: Set(if r.enabled { 1 } else { 0 }),
+        }
+        .insert(&db)
+        .await?;
     }
     Ok(())
 }
@@ -266,18 +284,13 @@ fn project_name_from_key(key: &str) -> Option<String> {
     }
 }
 
-async fn find_project_id(path: &PathBuf, name: &str) -> Option<Uuid> {
-    // projects table lives in same db
-    let db = Database::connect(db_url(path)).await.ok()?;
-    // raw query
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT id FROM projects WHERE name = ?",
-        [name.into()],
-    );
-    let row = db.query_one_raw(stmt).await.ok()??;
-    let id_str: String = row.try_get("", "id").ok()?;
-    Uuid::parse_str(&id_str).ok()
+async fn find_project_id(db: &DatabaseConnection, name: &str) -> Option<Uuid> {
+    let row = ProjectEntity::find()
+        .filter(ProjectColumn::Name.eq(name))
+        .one(db)
+        .await
+        .ok()??;
+    Uuid::parse_str(&row.id).ok()
 }
 
 async fn load_state_db(path: PathBuf) -> Result<HashMap<String, IssueState>> {
@@ -324,11 +337,11 @@ async fn save_state_db(path: PathBuf, issues: HashMap<String, IssueState>) -> Re
 
     for (key, rec) in issues {
         let project_id = if let Some(name) = project_name_from_key(&key) {
-            find_project_id(&path, &name).await
+            find_project_id(&db, &name).await
         } else {
             None
         };
-        let am = IssueActiveModel {
+        IssueActiveModel {
             id: Set(Uuid::now_v7()),
             project_id: Set(project_id),
             issue_key: Set(key),
@@ -337,8 +350,9 @@ async fn save_state_db(path: PathBuf, issues: HashMap<String, IssueState>) -> Re
             last_error: Set(rec.last_error),
             thread_id: Set(rec.thread_id),
             updated_at: Set(rec.updated_at as i64),
-        };
-        am.insert(&db).await?;
+        }
+        .insert(&db)
+        .await?;
     }
 
     Ok(())
@@ -366,13 +380,8 @@ pub fn save_state(issues: &HashMap<String, IssueState>) -> Result<()> {
 
 async fn mention_cursor_db(path: PathBuf, repo: String) -> Result<Option<String>> {
     let db = connect(&path).await?;
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT cursor FROM mention_cursors WHERE repo = ?",
-        [repo.into()],
-    );
-    let row = db.query_one_raw(stmt).await?;
-    Ok(row.and_then(|r| r.try_get::<String>("", "cursor").ok()))
+    let row = MentionCursorEntity::find_by_id(repo).one(&db).await?;
+    Ok(row.map(|r| r.cursor))
 }
 
 pub fn mention_cursor(repo: &str) -> Option<String> {
@@ -384,13 +393,20 @@ pub fn mention_cursor(repo: &str) -> Option<String> {
 
 async fn set_mention_cursor_db(path: PathBuf, repo: String, cursor: String) -> Result<()> {
     let db = connect(&path).await?;
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "INSERT INTO mention_cursors (repo, cursor, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(repo) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
-        [repo.into(), cursor.into(), (now() as i64).into()],
-    );
-    db.execute_raw(stmt).await?;
+    let ts = now() as i64;
+    let am = MentionCursorActiveModel {
+        repo: Set(repo),
+        cursor: Set(cursor),
+        updated_at: Set(ts),
+    };
+    MentionCursorEntity::insert(am)
+        .on_conflict(
+            OnConflict::column(MentionCursorColumn::Repo)
+                .update_columns([MentionCursorColumn::Cursor, MentionCursorColumn::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(&db)
+        .await?;
     Ok(())
 }
 
@@ -405,12 +421,10 @@ pub fn set_mention_cursor(repo: &str, cursor: &str) -> Result<()> {
 
 async fn mention_event_seen_db(path: PathBuf, key: String) -> Result<bool> {
     let db = connect(&path).await?;
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT 1 FROM mention_events WHERE event_key = ?",
-        [key.into()],
-    );
-    Ok(db.query_one_raw(stmt).await?.is_some())
+    Ok(MentionEventEntity::find_by_id(key)
+        .one(&db)
+        .await?
+        .is_some())
 }
 
 pub fn mention_event_seen(key: &str) -> bool {
@@ -425,20 +439,26 @@ async fn record_mention_event_db(
     detail: String,
 ) -> Result<()> {
     let db = connect(&path).await?;
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "INSERT INTO mention_events (event_key, status, detail, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(event_key) DO UPDATE SET status = excluded.status, detail = excluded.detail, updated_at = excluded.updated_at",
-        [
-            key.into(),
-            status.into(),
-            detail.into(),
-            (now() as i64).into(),
-            (now() as i64).into(),
-        ],
-    );
-    db.execute_raw(stmt).await?;
+    let ts = now() as i64;
+    let am = MentionEventActiveModel {
+        event_key: Set(key),
+        status: Set(status),
+        detail: Set(Some(detail)),
+        created_at: Set(ts),
+        updated_at: Set(ts),
+    };
+    MentionEventEntity::insert(am)
+        .on_conflict(
+            OnConflict::column(MentionEventColumn::EventKey)
+                .update_columns([
+                    MentionEventColumn::Status,
+                    MentionEventColumn::Detail,
+                    MentionEventColumn::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&db)
+        .await?;
     Ok(())
 }
 
@@ -452,21 +472,19 @@ pub fn record_mention_event(key: &str, status: &str, detail: &str) -> Result<()>
     ))
 }
 
-async fn count_mention_launches_db(path: PathBuf, since: i64) -> Result<usize> {
+async fn count_mention_launches_db(path: PathBuf, since: i64) -> Result<u64> {
     let db = connect(&path).await?;
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT COUNT(*) AS c FROM mention_events WHERE status IN ('accepted', 'completed') AND created_at >= ?",
-        [since.into()],
-    );
-    let row = db.query_one_raw(stmt).await?;
-    let count: i64 = row.and_then(|r| r.try_get("", "c").ok()).unwrap_or(0);
-    Ok(count.max(0) as usize)
+    MentionEventEntity::find()
+        .filter(MentionEventColumn::Status.is_in(["accepted", "completed"]))
+        .filter(MentionEventColumn::CreatedAt.gte(since))
+        .count(&db)
+        .await
+        .map_err(Into::into)
 }
 
 pub fn count_mention_launches_since(since: u64) -> usize {
     let path = state_file();
-    run_async(count_mention_launches_db(path, since as i64)).unwrap_or(0)
+    run_async(count_mention_launches_db(path, since as i64)).unwrap_or(0) as usize
 }
 
 #[cfg(test)]
