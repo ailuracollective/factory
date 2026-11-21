@@ -11,10 +11,11 @@
 ### Factory CLI (`apps/cli`)
 Local daemon + manual commands. Three modes:
 - Local mode (existing): webhooks direct to machine, T3 agent launch.
-- Standalone mentions: `factory mentions` polls GitHub issues/comments for
-  configured mentions and dispatches authorized work. Ingestion is behind an
-  `EventSource` trait (`apps/cli/src/mentions.rs`), so a Gateway-backed source can
-  replace the poller without changing parsing, authorization or dispatch.
+- Mentions: `factory listen` handles mention webhooks in real time
+  (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`);
+  `factory mentions` provides polling fallback. Parsing, authorization, dedup and
+  dispatch live in `apps/cli/src/mentions.rs` behind `EventSource`/`Engine`, so a
+  Gateway-backed source can replace polling without changing core logic.
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.
 
 ### Factory Gateway (`apps/gateway`)

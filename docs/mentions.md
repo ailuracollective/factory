@@ -49,15 +49,18 @@ executed as a shell command.
 
 ## Usage
 
+Webhook mode (recommended when you already run `factory listen`): `factory listen`
+now also processes `issue_comment`, `issues`, and `pull_request` mention events in
+real time, reusing the same parser, authorization, dedup, and dispatch logic. No
+polling delay.
+
+Polling fallback (no public webhook endpoint needed):
+
 ```bash
 factory mentions --once        # one poll (useful for cron/tests)
 factory mentions               # poll continuously
 factory mentions --interval 120
 ```
-
-Polling is a separate foreground process; it is not started by `factory start`.
-Run it alongside the webhook listener (for example under systemd) or replace the
-listener if you do not use webhooks:
 
 ```ini
 [Service]
@@ -119,10 +122,12 @@ new GitHub App or bot account is required.
 
 ## Limitations
 
-- Polling adds up to `poll_interval_secs` of latency.
-- Only the first 100 updated issues and 100 updated comments per repository per
-  poll are fetched; a large backlog is caught up over subsequent polls.
-- Inline PR review comments (`/pulls/{n}/comments`) are not polled.
+- Webhook mode needs a reachable endpoint (tunnel/GitHub App/gateway). Polling
+  fallback adds up to `poll_interval_secs` of latency.
+- Polling fetches at most 100 updated issues and 100 updated comments per
+  repository per poll; a large backlog is caught up over subsequent polls.
+- Inline PR review comments (`pull_request_review_comment`) are handled by
+  webhooks; the polling fallback does not fetch them yet.
 - Requests from pull request conversation comments are dispatched as an
   issue-style agent run with a note to inspect the PR; there is no special
   "update the existing PR branch" flow yet.

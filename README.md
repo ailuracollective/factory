@@ -53,9 +53,10 @@ with the secret from `factory init`.
 3. For each qualifying issue, it launches a T3 Code agent in an isolated git worktree/branch.
 4. The agent implements, tests, and opens a pull request (does not merge).
 
-Alternatively, `factory mentions` polls allowlisted repositories for mentions of
-your configured GitHub username and dispatches authorized requests without the
-Gateway or GitHub notifications. See [docs/mentions.md](docs/mentions.md).
+Alternatively, mentions can be handled in real time via webhooks through
+`factory listen` (recommended when webhooks are configured) or by polling with
+`factory mentions` (no public endpoint needed). See
+[docs/mentions.md](docs/mentions.md).
 
 ## Requirements
 
