@@ -88,7 +88,7 @@ pub trait EventStore {
 
 /// Launch abstraction so tests do not invoke `t3` or GitHub.
 pub trait Dispatcher {
-    fn launch(&self, event: &TriggerEvent, instruction: &str) -> Option<String>;
+    fn launch(&self, event: &TriggerEvent, instruction: &str) -> Result<String, String>;
     fn report(&self, event: &TriggerEvent, status: &str);
 }
 
@@ -314,7 +314,7 @@ impl<'a> Engine<'a> {
         );
 
         match self.dispatcher.launch(event, &invocation.instruction) {
-            Some(thread) => {
+            Ok(thread) => {
                 let _ = self
                     .store
                     .record(&key, "completed", &format!("op=fix thread={thread}"));
@@ -322,11 +322,14 @@ impl<'a> Engine<'a> {
                     .report(event, &format!("completed; agent thread `{thread}`"));
                 Outcome::Launched(thread)
             }
-            None => {
-                let _ = self.store.record(&key, "failed", "op=fix launch failed");
+            Err(e) => {
+                let detail = e.chars().take(500).collect::<String>();
+                let _ =
+                    self.store
+                        .record(&key, "failed", &format!("op=fix launch failed: {detail}"));
                 self.dispatcher
-                    .report(event, "failed to launch an agent for this request");
-                Outcome::Failed("launch failed".to_string())
+                    .report(event, &format!("failed to launch agent: {detail}"));
+                Outcome::Failed(e)
             }
         }
     }
@@ -509,6 +512,98 @@ fn url_of(value: &Value) -> String {
         .to_string()
 }
 
+/// Build a TriggerEvent from a GitHub webhook payload.
+/// Supports `issue_comment`, `issues`, and `pull_request` events.
+pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> {
+    let repo = payload
+        .get("repository")
+        .and_then(|r| r.get("full_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if repo.is_empty() {
+        return None;
+    }
+    match event {
+        "issue_comment" => {
+            let comment = payload.get("comment")?;
+            let issue = payload.get("issue")?;
+            let number = issue.get("number").and_then(Value::as_u64)?;
+            let updated_at = comment
+                .get("updated_at")
+                .and_then(Value::as_str)?
+                .to_string();
+            let id = comment.get("id").and_then(id_string)?;
+            let (author, author_is_bot) = author_of(comment.get("user"));
+            Some(TriggerEvent {
+                repo,
+                kind: EventKind::Comment,
+                id,
+                number,
+                title: text(issue, "title"),
+                body: text(comment, "body"),
+                url: url_of(comment),
+                author,
+                author_is_bot,
+                is_pr: issue.get("pull_request").is_some(),
+                updated_at,
+            })
+        }
+        "issues" => issue_event(&repo, payload.get("issue")?).map(|mut e| {
+            e.repo = repo;
+            e
+        }),
+        "pull_request" => {
+            let pr = payload.get("pull_request")?;
+            let number = pr.get("number").and_then(Value::as_u64)?;
+            let updated_at = pr.get("updated_at").and_then(Value::as_str)?.to_string();
+            let id = pr
+                .get("id")
+                .and_then(id_string)
+                .unwrap_or_else(|| number.to_string());
+            let (author, author_is_bot) = author_of(pr.get("user"));
+            Some(TriggerEvent {
+                repo,
+                kind: EventKind::Issue,
+                id,
+                number,
+                title: text(pr, "title"),
+                body: text(pr, "body"),
+                url: url_of(pr),
+                author,
+                author_is_bot,
+                is_pr: true,
+                updated_at,
+            })
+        }
+        "pull_request_review_comment" => {
+            let comment = payload.get("comment")?;
+            let pr = payload.get("pull_request")?;
+            let number = pr.get("number").and_then(Value::as_u64)?;
+            let updated_at = comment
+                .get("updated_at")
+                .and_then(Value::as_str)?
+                .to_string();
+            let id = comment.get("id").and_then(id_string)?;
+            let (author, author_is_bot) = author_of(comment.get("user"));
+            Some(TriggerEvent {
+                repo,
+                kind: EventKind::Comment,
+                id,
+                number,
+                title: text(pr, "title"),
+                body: text(comment, "body"),
+                url: url_of(comment),
+                author,
+                author_is_bot,
+                is_pr: true,
+                updated_at,
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Write-permission check through `gh`. Fails closed.
 pub struct GhAuthorizer;
 
@@ -540,32 +635,70 @@ pub struct AgentDispatcher<'a> {
 }
 
 impl Dispatcher for AgentDispatcher<'_> {
-    fn launch(&self, event: &TriggerEvent, instruction: &str) -> Option<String> {
-        let entry = self.config.repos.iter().find(|r| {
-            r.enabled
-                && (r.github.eq_ignore_ascii_case(&event.repo)
-                    || r.name.eq_ignore_ascii_case(&event.repo))
-        })?;
+    fn launch(&self, event: &TriggerEvent, instruction: &str) -> Result<String, String> {
+        let entry = self
+            .config
+            .repos
+            .iter()
+            .find(|r| {
+                r.enabled
+                    && (r.github.eq_ignore_ascii_case(&event.repo)
+                        || r.name.eq_ignore_ascii_case(&event.repo))
+            })
+            .ok_or_else(|| format!("repo not configured: {}", event.repo))?;
         let project = PathBuf::from(&entry.path);
         if !project.exists() {
-            tracing::error!(path = %project.display(), "project path not found");
-            return None;
+            let msg = format!("project path not found: {}", project.display());
+            tracing::error!("{}", msg);
+            return Err(msg);
         }
+        let issue_key = format!("{}#{}", event.repo, event.number);
+        let prior = crate::state::issue_state(&issue_key);
+        let attempt = prior
+            .as_ref()
+            .map(|s| s.attempts.saturating_add(1))
+            .unwrap_or(1);
         let issue = serde_json::json!({
             "number": event.number,
             "title": event.title,
             "url": event.url,
             "labels": [],
         });
-        let prompt = build_mention_prompt(event, instruction, &issue);
-        crate::agent::launch_agent(&issue, &project, self.config, Some(&prompt))
+        let prompt = build_mention_prompt(event, instruction, &issue, prior.as_ref());
+        let thread = crate::agent::launch_agent(
+            &issue,
+            &project,
+            self.config,
+            Some(&prompt),
+            prior.as_ref().and_then(|s| s.thread_id.as_deref()),
+            attempt,
+        )?;
+        let pr_url = prior
+            .as_ref()
+            .and_then(|s| s.pr_url.clone())
+            .or_else(|| discover_pr_url(&event.repo, event.number));
+        let _ = crate::state::update_issue_state(&issue_key, |rec| {
+            rec.status = crate::state::IssueStatus::Completed;
+            rec.thread_id = Some(thread.clone());
+            rec.last_error = None;
+            if pr_url.is_some() {
+                rec.pr_url = pr_url;
+            }
+        });
+        Ok(thread)
     }
 
     fn report(&self, event: &TriggerEvent, status: &str) {
         if !self.config.mentions.report {
             return;
         }
-        let body = format!("{REPORT_MARKER}\nFactory: {status}");
+        let mentions = issue_assignee_mentions(&event.repo, event.number);
+        let prefix = if mentions.is_empty() {
+            String::new()
+        } else {
+            format!("{mentions}\n\n")
+        };
+        let body = format!("{REPORT_MARKER}\n{prefix}Factory: {status}");
         let path = format!("repos/{}/issues/{}/comments", event.repo, event.number);
         let body_arg = format!("body={body}");
         let output = Command::new("gh")
@@ -583,8 +716,76 @@ impl Dispatcher for AgentDispatcher<'_> {
     }
 }
 
-pub fn build_mention_prompt(event: &TriggerEvent, instruction: &str, issue: &Value) -> String {
-    let mut base = crate::agent::build_prompt(issue);
+fn issue_assignee_mentions(repo: &str, number: u64) -> String {
+    let path = format!("repos/{repo}/issues/{number}");
+    let out = Command::new("gh")
+        .args(["api", &path, "--jq", ".assignees[].login"])
+        .output();
+    let Ok(out) = out else { return String::new() };
+    if !out.status.success() {
+        return String::new();
+    }
+    let mentions = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| format!("@{}", l.trim_start_matches('@')))
+        .collect::<Vec<_>>();
+    mentions.join(" ")
+}
+
+pub fn discover_pr_url(repo: &str, number: u64) -> Option<String> {
+    let prefix = format!("issue-{number}-");
+    let out = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "all",
+            "--json",
+            "number,url,headRefName",
+            "--limit",
+            "100",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let items: Vec<Value> = serde_json::from_slice(&out.stdout).ok()?;
+    items.into_iter().find_map(|v| {
+        let head = v.get("headRefName").and_then(Value::as_str).unwrap_or("");
+        if head.starts_with(&prefix) || head == format!("issue-{number}") {
+            v.get("url").and_then(Value::as_str).map(|s| s.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+pub fn build_mention_prompt(
+    event: &TriggerEvent,
+    instruction: &str,
+    issue: &Value,
+    prior: Option<&crate::state::IssueState>,
+) -> String {
+    let same_thread = prior.and_then(|s| s.thread_id.as_ref()).is_some();
+    let mut base = if same_thread {
+        format!(
+            "Follow-up on GitHub issue #{} ({}).\nThis is the same issue thread; keep prior context and continue from existing work.\n",
+            event.number, event.url
+        )
+    } else {
+        crate::agent::build_prompt(issue)
+    };
+    if let Some(pr_url) = prior.and_then(|s| s.pr_url.as_deref()) {
+        base.push_str(&format!(
+            "Linked PR: {pr_url}\nUse `gh pr view --repo {repo} {pr_url}` for PR details.\n",
+            repo = event.repo
+        ));
+    }
     if event.kind == EventKind::Comment {
         base.push_str(&format!(
             "\nNote: #{number} may be a pull request. Use `gh pr view {number}` if it is not an issue, and do not close the pull request itself.\n",
@@ -816,15 +1017,15 @@ mod tests {
     }
 
     impl Dispatcher for FakeDispatcher {
-        fn launch(&self, event: &TriggerEvent, instruction: &str) -> Option<String> {
+        fn launch(&self, event: &TriggerEvent, instruction: &str) -> Result<String, String> {
             self.launched
                 .lock()
                 .unwrap()
                 .push((event.audit_key(), instruction.to_string()));
             if self.fail {
-                None
+                Err("launch failed".to_string())
             } else {
-                Some(format!("thread-{}", event.id))
+                Ok(format!("thread-{}", event.id))
             }
         }
 
@@ -1077,7 +1278,7 @@ mod tests {
             "title": "Issue",
             "url": "https://github.com/org/factory/issues/5"
         });
-        let prompt = build_mention_prompt(&ev, "rm -rf /", &issue);
+        let prompt = build_mention_prompt(&ev, "rm -rf /", &issue, None);
         assert!(prompt.contains("Closes #5"));
         assert!(prompt.contains("untrusted"));
         assert!(prompt.contains("rm -rf /"));

@@ -26,6 +26,7 @@ mod issue_store {
         pub attempts: i32,
         pub last_error: Option<String>,
         pub thread_id: Option<String>,
+        pub pr_url: Option<String>,
         pub updated_at: i64,
     }
 
@@ -148,6 +149,8 @@ pub struct IssueState {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub pr_url: Option<String>,
+    #[serde(default)]
     pub updated_at: u64,
 }
 
@@ -158,6 +161,7 @@ impl Default for IssueState {
             attempts: 0,
             last_error: None,
             thread_id: None,
+            pr_url: None,
             updated_at: now(),
         }
     }
@@ -228,6 +232,10 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
         stmt.if_not_exists();
         db.execute(&stmt).await?;
     }
+    // Lightweight migration for existing DBs.
+    let _ = db
+        .execute_unprepared("ALTER TABLE issues ADD COLUMN pr_url TEXT")
+        .await;
     Ok(db)
 }
 
@@ -306,6 +314,7 @@ async fn load_state_db(path: PathBuf) -> Result<HashMap<String, IssueState>> {
                 attempts: m.attempts as u32,
                 last_error: m.last_error,
                 thread_id: m.thread_id,
+                pr_url: m.pr_url,
                 updated_at: m.updated_at as u64,
             },
         );
@@ -349,6 +358,7 @@ async fn save_state_db(path: PathBuf, issues: HashMap<String, IssueState>) -> Re
             attempts: Set(rec.attempts as i32),
             last_error: Set(rec.last_error),
             thread_id: Set(rec.thread_id),
+            pr_url: Set(rec.pr_url),
             updated_at: Set(rec.updated_at as i64),
         }
         .insert(&db)
@@ -376,6 +386,18 @@ pub fn save_state(issues: &HashMap<String, IssueState>) -> Result<()> {
     let path = state_file();
     let issues = issues.clone();
     run_async(save_state_db(path, issues))
+}
+
+pub fn issue_state(key: &str) -> Option<IssueState> {
+    load_state().remove(key)
+}
+
+pub fn update_issue_state<F: FnOnce(&mut IssueState)>(key: &str, f: F) -> Result<()> {
+    let mut issues = load_state();
+    let rec = issues.entry(key.to_string()).or_default();
+    f(rec);
+    rec.updated_at = now();
+    save_state(&issues)
 }
 
 async fn mention_cursor_db(path: PathBuf, repo: String) -> Result<Option<String>> {

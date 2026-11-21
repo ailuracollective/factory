@@ -100,6 +100,8 @@ enum RepoAction {
     Remove { name: String },
     /// Sync labels for a repo
     Sync { name: String },
+    /// Check whether repos are correctly configured
+    Check { name: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -124,6 +126,7 @@ fn main() -> ExitCode {
             RepoAction::List => cli::repo_list(),
             RepoAction::Remove { name } => cli::repo_remove(&name),
             RepoAction::Sync { name } => cli::repo_sync(&name),
+            RepoAction::Check { name } => cli::repo_check(name.as_deref()),
         },
         Commands::Start { foreground } => cli::start(foreground),
         Commands::Stop => cli::stop(),

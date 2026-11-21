@@ -111,8 +111,14 @@ async fn webhook(
     let event = headers
         .get("x-github-event")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !event.is_empty() && event != "issues" {
+        .unwrap_or("")
+        .to_string();
+    if !event.is_empty()
+        && !matches!(
+            event.as_str(),
+            "issues" | "issue_comment" | "pull_request" | "pull_request_review_comment"
+        )
+    {
         return (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({"status": "ignored", "reason": format!("event={}", event)})),
@@ -137,7 +143,7 @@ async fn webhook(
 
     let state_clone = state.clone();
     tokio::spawn(async move {
-        let status = handle_payload(state_clone, payload).await;
+        let status = handle_payload(state_clone, event, payload).await;
         tracing::info!("webhook result: {}", status);
     });
 
@@ -172,19 +178,61 @@ fn verify_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
         == 0
 }
 
-async fn handle_payload(state: AppState, payload: Value) -> String {
+async fn handle_payload(state: AppState, event: String, payload: Value) -> String {
     let action = payload
         .get("action")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+
+    let mention_eligible = matches!(
+        (event.as_str(), action.as_str()),
+        ("issue_comment", "created" | "edited")
+            | ("issues", "opened" | "edited")
+            | ("pull_request", "opened" | "edited")
+            | ("pull_request_review_comment", "created" | "edited")
+    );
+    if mention_eligible
+        && state.config.mentions.enabled
+        && !state.config.mentions.usernames.is_empty()
+    {
+        if let Some(mention_event) = crate::mentions::event_from_webhook(&event, &payload) {
+            let config = state.config.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                let store = crate::mentions::SqliteEventStore;
+                let dispatcher = crate::mentions::AgentDispatcher { config: &config };
+                let authorizer = crate::mentions::GhAuthorizer;
+                let engine =
+                    crate::mentions::Engine::new(&config, &store, &dispatcher, &authorizer);
+                engine.handle(&mention_event, crate::state::now())
+            })
+            .await
+            .unwrap_or(crate::mentions::Outcome::Failed(
+                "mention task panicked".to_string(),
+            ));
+            match outcome {
+                crate::mentions::Outcome::Ignored(_) => {}
+                crate::mentions::Outcome::Rejected(reason) => {
+                    tracing::info!(reason = %reason, "mention rejected; continuing webhook handling");
+                }
+                crate::mentions::Outcome::Launched(thread) => {
+                    return format!("mention launched: {thread}");
+                }
+                crate::mentions::Outcome::Failed(reason) => {
+                    return format!("mention failed: {reason}");
+                }
+            }
+        }
+    }
+
+    if event != "issues" || !["opened", "reopened", "labeled"].contains(&action.as_str()) {
+        return format!("ignored: event={event} action={action}");
+    }
+
     let issue = match payload.get("issue") {
         Some(i) if i.is_object() => i.clone(),
         _ => return "ignored: no issue".to_string(),
     };
-    if !["opened", "reopened", "labeled"].contains(&action.as_str()) {
-        return format!("ignored: action={}", action);
-    }
     let number = match issue.get("number").and_then(|v| v.as_i64()) {
         Some(n) => n,
         None => return "ignored: bad number".to_string(),
@@ -271,19 +319,37 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
         return format!("ignored: no project for {}", repo);
     }
 
+    let (existing_thread, existing_pr, attempt) = {
+        let issues = state.issues.lock().unwrap();
+        let rec = issues.get(&key);
+        (
+            rec.and_then(|r| r.thread_id.clone()),
+            rec.and_then(|r| r.pr_url.clone()),
+            rec.map(|r| r.attempts).unwrap_or(1),
+        )
+    };
     let issue_for_launch = issue.clone();
     let project_for_launch = project.clone();
     let config_for_launch = state.config.clone();
-    let thread_id = tokio::task::spawn_blocking(move || {
+    let existing_thread_for_launch = existing_thread.clone();
+    let launch_result = tokio::task::spawn_blocking(move || {
         crate::agent::launch_agent(
             &issue_for_launch,
             &project_for_launch,
             &config_for_launch,
             None,
+            existing_thread_for_launch.as_deref(),
+            attempt,
         )
     })
-    .await
-    .unwrap_or(None);
+    .await;
+    let pr_url = existing_pr.or_else(|| crate::mentions::discover_pr_url(&repo, number as u64));
+
+    let (thread_id, failure_message) = match launch_result {
+        Ok(Ok(id)) => (Some(id), None),
+        Ok(Err(e)) => (None, Some(e)),
+        Err(e) => (None, Some(format!("launch task failed: {e}"))),
+    };
 
     {
         let mut issues = state.issues.lock().unwrap();
@@ -295,8 +361,11 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
             tracing::info!(issue = %key, thread_id = %id, "launch succeeded");
         } else {
             rec.status = IssueStatus::Failed;
-            rec.last_error = Some("launch_agent failed".to_string());
+            rec.last_error = failure_message.clone();
             tracing::error!(issue = %key, "launch failed");
+        }
+        if let Some(url) = pr_url {
+            rec.pr_url = Some(url);
         }
         rec.updated_at = crate::state::now();
         let snapshot = issues.clone();
@@ -304,14 +373,64 @@ async fn handle_payload(state: AppState, payload: Value) -> String {
         let _ = save_state(&snapshot);
     }
 
-    if let Some(ref id) = thread_id {
-        // keep a direct mapping for traceability (already in record.thread_id)
-        let _ = id;
+    if let Some(err) = failure_message {
+        let assignees = issue_assignee_logins(&issue);
+        report_launch_failure(&repo, number, &err, &assignees);
+        format!("failed {}", key)
+    } else {
+        format!("launched {}", key)
     }
+}
 
-    match thread_id {
-        Some(_) => format!("launched {}", key),
-        None => format!("failed {}", key),
+fn issue_assignee_logins(issue: &Value) -> Vec<String> {
+    issue
+        .get("assignees")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| a.get("login").and_then(|l| l.as_str()))
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn mention_prefix(assignees: &[String]) -> String {
+    if assignees.is_empty() {
+        String::new()
+    } else {
+        let mentions = assignees
+            .iter()
+            .map(|a| format!("@{}", a.trim_start_matches('@')))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("{mentions}\n\n")
+    }
+}
+
+fn report_launch_failure(repo: &str, number: i64, error: &str, assignees: &[String]) {
+    let detail = error.chars().take(1000).collect::<String>();
+    let mentions = mention_prefix(assignees);
+    let body = format!(
+        "{}\n{}Factory failed to launch an agent for this issue.\n\n```\n{}\n```",
+        crate::mentions::REPORT_MARKER,
+        mentions,
+        detail
+    );
+    let path = format!("repos/{repo}/issues/{number}/comments");
+    let body_arg = format!("body={body}");
+    let output = std::process::Command::new("gh")
+        .args(["api", "-X", "POST", &path, "-f", &body_arg])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => tracing::warn!(
+            repo = %repo,
+            "failed to post failure comment: {}",
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) => tracing::warn!(repo = %repo, "failed to post failure comment: {e}"),
     }
 }
 
@@ -460,7 +579,7 @@ mod lifecycle_tests {
             "repository": {"full_name": "org/repo"}
         });
 
-        let r = handle_payload(state.clone(), payload.clone()).await;
+        let r = handle_payload(state.clone(), "issues".to_string(), payload.clone()).await;
         assert!(r.starts_with("failed"), "{}", r);
 
         let t3_ok = write_script(
@@ -469,7 +588,7 @@ mod lifecycle_tests {
         );
         std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
 
-        let r2 = handle_payload(state.clone(), payload).await;
+        let r2 = handle_payload(state.clone(), "issues".to_string(), payload).await;
         assert!(r2.starts_with("launched"), "{}", r2);
 
         let issues = state.issues.lock().unwrap();
@@ -509,9 +628,9 @@ mod lifecycle_tests {
             "repository": {"full_name": "org/repo"}
         });
 
-        let r1 = handle_payload(state.clone(), payload.clone()).await;
+        let r1 = handle_payload(state.clone(), "issues".to_string(), payload.clone()).await;
         assert!(r1.starts_with("launched"), "{}", r1);
-        let r2 = handle_payload(state.clone(), payload).await;
+        let r2 = handle_payload(state.clone(), "issues".to_string(), payload).await;
         assert!(r2.contains("already"), "{}", r2);
 
         std::env::remove_var("ISSUE_FACTORY_T3");
@@ -546,8 +665,12 @@ mod lifecycle_tests {
             "repository": {"full_name": "org/repo"}
         });
 
-        let h1 = tokio::spawn(handle_payload(state.clone(), payload.clone()));
-        let h2 = tokio::spawn(handle_payload(state.clone(), payload));
+        let h1 = tokio::spawn(handle_payload(
+            state.clone(),
+            "issues".to_string(),
+            payload.clone(),
+        ));
+        let h2 = tokio::spawn(handle_payload(state.clone(), "issues".to_string(), payload));
         let a = h1.await.unwrap();
         let b = h2.await.unwrap();
         // one launched, one ignored as already running
@@ -590,6 +713,54 @@ mod lifecycle_tests {
             IssueStatus::Failed
         );
 
+        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+    }
+
+    #[tokio::test]
+    async fn issue_comment_mention_launches_via_webhook() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join("factory_lc_mention_wh");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let state_file = std::env::temp_dir().join("factory_lc_mention_wh_state.json");
+        let _ = std::fs::remove_file(&state_file);
+        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+
+        let t3_ok = write_script(
+            "t3_mention_wh.sh",
+            "#!/bin/sh\necho '{\"threadId\":\"thread-mention-wh\"}'\n",
+        );
+        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+
+        let mut config = make_config(&tmp);
+        config.mentions.enabled = true;
+        config.mentions.usernames = vec!["alice".to_string()];
+        config.mentions.command = "factory".to_string();
+
+        let state = AppState {
+            config: Arc::new(config),
+            issues: Arc::new(Mutex::new(load_state())),
+        };
+
+        let payload = json!({
+            "action": "created",
+            "issue": {"number": 7, "title": "Bug", "html_url": "u", "pull_request": null},
+            "comment": {
+                "id": 1001,
+                "body": "@alice factory fix it",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "html_url": "c",
+                "user": {"login": "alice", "type": "User"}
+            },
+            "repository": {"full_name": "org/repo"}
+        });
+
+        let r = handle_payload(state.clone(), "issue_comment".to_string(), payload).await;
+        assert!(r.starts_with("mention launched"), "{}", r);
+
+        std::env::remove_var("ISSUE_FACTORY_T3");
         std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
     }
 }

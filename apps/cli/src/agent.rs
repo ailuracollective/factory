@@ -38,23 +38,71 @@ pub fn launch_agent(
     project: &Path,
     config: &Config,
     prompt: Option<&str>,
-) -> Option<String> {
-    let number = issue.get("number").and_then(|v| v.as_i64())?;
+    existing_thread: Option<&str>,
+    attempt: u32,
+) -> Result<String, String> {
+    let number = issue
+        .get("number")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "missing issue number".to_string())?;
     let title = issue
         .get("title")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim();
-    let branch = format!("issue-{}-{}", number, slugify(title));
+    let prompt = match prompt {
+        Some(p) if !p.trim().is_empty() => p.to_string(),
+        _ => build_prompt(issue),
+    };
+    let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
+
+    if let Some(thread_id) = existing_thread.filter(|t| !t.trim().is_empty()) {
+        tracing::info!(
+            "Sending mention to existing thread {} for issue #{}",
+            thread_id,
+            number
+        );
+        let mut cmd = Command::new(&t3_bin);
+        cmd.arg("thread")
+            .arg("send")
+            .arg(thread_id)
+            .arg(&prompt)
+            .arg("--wait")
+            .arg("--json")
+            .current_dir(project);
+        match cmd.output() {
+            Ok(o) if o.status.success() => return Ok(thread_id.to_string()),
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                tracing::warn!(
+                    "t3 thread send failed for issue #{}, falling back to start: {}",
+                    number,
+                    if stderr.trim().is_empty() {
+                        stdout.trim()
+                    } else {
+                        stderr.trim()
+                    }
+                );
+            }
+            Err(e) => tracing::warn!(
+                "t3 thread send error for issue #{}, falling back to start: {}",
+                number,
+                e
+            ),
+        }
+    }
+
+    let branch = if attempt > 1 {
+        format!("issue-{}-{}-r{}", number, slugify(title), attempt)
+    } else {
+        format!("issue-{}-{}", number, slugify(title))
+    };
     let thread_title = format!("Fix issue #{}: {}", number, title);
     let thread_title = if thread_title.len() > 80 {
         thread_title[..80].to_string()
     } else {
         thread_title
-    };
-    let prompt = match prompt {
-        Some(p) if !p.trim().is_empty() => p.to_string(),
-        _ => build_prompt(issue),
     };
 
     let defaults = &config.defaults;
@@ -63,7 +111,6 @@ pub fn launch_agent(
     let model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
     let base_branch =
         std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| defaults.base_branch.clone());
-    let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
 
     let mut cmd = Command::new(&t3_bin);
     cmd.arg("thread")
@@ -93,34 +140,35 @@ pub fn launch_agent(
     let output = match cmd.output() {
         Ok(o) => o,
         Err(e) => {
-            tracing::error!("Failed to launch t3: {}", e);
-            return None;
+            let msg = format!("Failed to launch t3: {e}");
+            tracing::error!("{}", msg);
+            return Err(msg);
         }
     };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        tracing::error!(
-            "t3 failed for issue #{}: {}",
-            number,
-            if stderr.trim().is_empty() {
-                stdout.trim()
-            } else {
-                stderr.trim()
-            }
-        );
-        return None;
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        let msg = format!("t3 failed for issue #{number}: {detail}");
+        tracing::error!("{}", msg);
+        return Err(msg);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let thread_id = parse_thread_id(&stdout);
     if let Some(ref id) = thread_id {
         tracing::info!("Launched thread {} for issue #{}", id, number);
+        Ok(id.clone())
     } else {
-        tracing::warn!("t3 succeeded but no thread id parsed: {}", stdout.trim());
+        let msg = format!("t3 succeeded but no thread id parsed: {}", stdout.trim());
+        tracing::warn!("{}", msg);
+        Err(msg)
     }
-    thread_id
 }
 
 fn parse_thread_id(output: &str) -> Option<String> {

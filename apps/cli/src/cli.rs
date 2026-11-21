@@ -116,6 +116,96 @@ pub fn repo_sync(name: &str) -> Result<()> {
     Ok(())
 }
 
+fn repo_check_results(
+    repo: &crate::config::RepoEntry,
+    webhook_expected: bool,
+) -> Vec<(&'static str, String)> {
+    let mut results = Vec::new();
+    let path = std::path::Path::new(&repo.path);
+
+    if path.is_dir() {
+        results.push(("OK", format!("path: {}", repo.path)));
+    } else {
+        results.push(("FAIL", format!("path missing: {}", repo.path)));
+    }
+
+    if repo.github.is_empty() {
+        results.push(("FAIL", "github slug missing".to_string()));
+    } else {
+        results.push(("OK", format!("github: {}", repo.github)));
+        let (code, remote) = run(&["git", "-C", &repo.path, "remote", "get-url", "origin"]);
+        if code == 0 && remote.contains(&repo.github) {
+            results.push(("OK", "git remote matches github".to_string()));
+        } else if code == 0 {
+            results.push((
+                "FAIL",
+                format!("git remote does not match github: {remote}"),
+            ));
+        } else {
+            results.push(("FAIL", format!("git remote unavailable: {remote}")));
+        }
+    }
+
+    if webhook_expected {
+        match repo.hook_id {
+            Some(id) => results.push(("OK", format!("webhook hook_id: {id}"))),
+            None => results.push((
+                "FAIL",
+                "webhook hook_id missing (funnel configured)".to_string(),
+            )),
+        }
+    }
+
+    if !repo.enabled {
+        results.push(("WARN", "repo is disabled".to_string()));
+    }
+
+    results
+}
+
+pub fn repo_check(name: Option<&str>) -> Result<()> {
+    let config = load_config()?;
+    let repos: Vec<_> = match name {
+        Some(n) => match get_repo(&config, n) {
+            Some(r) => vec![r.clone()],
+            None => {
+                println!("Repo not found: {n}");
+                anyhow::bail!("repo not found: {n}");
+            }
+        },
+        None => {
+            if config.repos.is_empty() {
+                println!("No repos configured. Use 'factory repo add <repo>'.");
+                return Ok(());
+            }
+            config.repos.clone()
+        }
+    };
+
+    let webhook_expected =
+        !config.webhook.funnel_url.is_empty() && !config.webhook.secret.is_empty();
+    let mut failed = 0usize;
+
+    for repo in &repos {
+        println!("{} ({})", repo.name, repo.github);
+        let mut repo_ok = true;
+        for (level, msg) in repo_check_results(repo, webhook_expected) {
+            println!("  [{level}] {msg}");
+            if level == "FAIL" {
+                repo_ok = false;
+            }
+        }
+        if !repo_ok {
+            failed += 1;
+        }
+    }
+
+    if failed > 0 {
+        anyhow::bail!("{failed} repo(s) misconfigured");
+    }
+    Ok(())
+}
+
 pub fn start(foreground: bool) -> Result<()> {
     let (code, _) = run(&["systemctl", "--user", "start", "factory"]);
     if code == 0 {
@@ -331,9 +421,39 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
             return Ok(());
         }
     };
-    match crate::agent::launch_agent(&issue_data, &project, &config, prompt.as_deref()) {
-        Some(tid) => println!("Launched thread: {}", tid),
-        None => println!("Failed to launch agent."),
+    let key = format!("{}#{}", repo_entry.github, issue);
+    let prior = crate::state::issue_state(&key);
+    let existing = prior.as_ref().and_then(|s| s.thread_id.clone());
+    let attempt = prior
+        .as_ref()
+        .map(|s| s.attempts.saturating_add(1))
+        .unwrap_or(1);
+    match crate::agent::launch_agent(
+        &issue_data,
+        &project,
+        &config,
+        prompt.as_deref(),
+        existing.as_deref(),
+        attempt,
+    ) {
+        Ok(tid) => {
+            let _ = crate::state::update_issue_state(&key, |rec| {
+                rec.status = crate::state::IssueStatus::Completed;
+                rec.thread_id = Some(tid.clone());
+                rec.last_error = None;
+                if rec.pr_url.is_none() {
+                    rec.pr_url = crate::mentions::discover_pr_url(&repo_entry.github, issue);
+                }
+            });
+            println!("Launched thread: {}", tid);
+        }
+        Err(e) => {
+            let _ = crate::state::update_issue_state(&key, |rec| {
+                rec.status = crate::state::IssueStatus::Failed;
+                rec.last_error = Some(e.clone());
+            });
+            println!("Failed to launch agent: {e}");
+        }
     }
     Ok(())
 }
@@ -354,9 +474,9 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
     }
     // build a minimal issue-like object
     let issue = serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
-    match crate::agent::launch_agent(&issue, &project, &config, Some(prompt)) {
-        Some(tid) => println!("Launched thread: {}", tid),
-        None => println!("Failed to launch agent."),
+    match crate::agent::launch_agent(&issue, &project, &config, Some(prompt), None, 1) {
+        Ok(tid) => println!("Launched thread: {}", tid),
+        Err(e) => println!("Failed to launch agent: {e}"),
     }
     Ok(())
 }
@@ -494,26 +614,48 @@ pub fn runner(once: bool) -> Result<()> {
 
                 let issue =
                     serde_json::json!({"number": number, "title": title, "url": url, "labels": []});
+                let key = format!("{}#{}", repo, number);
+                let prior = crate::state::issue_state(&key);
+                let existing = prior.as_ref().and_then(|s| s.thread_id.clone());
+                let attempt = prior
+                    .as_ref()
+                    .map(|s| s.attempts.saturating_add(1))
+                    .unwrap_or(1);
                 // heartbeat running
                 let _ = client
                     .post(format!("{}/jobs/{}/heartbeat", gw, encode_path_segment(&job_id)))
                     .json(&serde_json::json!({"runner_id": runner_id, "token": token, "status": "running"}))
                     .send();
 
-                match crate::agent::launch_agent(&issue, &project, &config, None) {
-                    Some(tid) => {
+                match crate::agent::launch_agent(
+                    &issue,
+                    &project,
+                    &config,
+                    None,
+                    existing.as_deref(),
+                    attempt,
+                ) {
+                    Ok(tid) => {
+                        let _ = crate::state::update_issue_state(&key, |rec| {
+                            rec.status = crate::state::IssueStatus::Completed;
+                            rec.thread_id = Some(tid.clone());
+                            rec.last_error = None;
+                            if rec.pr_url.is_none() {
+                                rec.pr_url = crate::mentions::discover_pr_url(&repo, number as u64);
+                            }
+                        });
                         let _ = client
                             .post(format!("{}/jobs/{}/complete", gw, encode_path_segment(&job_id)))
                             .json(&serde_json::json!({"runner_id": runner_id, "token": token, "thread_id": tid}))
                             .send();
                         println!("Completed job {} -> {}", job_id, tid);
                     }
-                    None => {
+                    Err(e) => {
                         let _ = client
                             .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
-                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "agent launch failed"}))
+                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": e}))
                             .send();
-                        println!("Failed job {}", job_id);
+                        println!("Failed job {}: {}", job_id, e);
                     }
                 }
 
@@ -536,5 +678,63 @@ pub fn runner(once: bool) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_secs(5));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::repo_check_results;
+    use crate::config::RepoEntry;
+    use std::process::Command;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    #[test]
+    fn repo_check_reports_ok_for_valid_repo() {
+        let dir = std::env::temp_dir().join(format!("factory-repo-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init"]);
+        git(
+            &dir,
+            &["remote", "add", "origin", "git@github.com:org/repo.git"],
+        );
+
+        let repo = RepoEntry {
+            name: "repo".to_string(),
+            path: dir.to_string_lossy().to_string(),
+            github: "org/repo".to_string(),
+            hook_id: Some(1),
+            enabled: true,
+        };
+        let results = repo_check_results(&repo, true);
+        assert!(results.iter().all(|(l, _)| *l != "FAIL"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repo_check_reports_missing_path_and_hook() {
+        let repo = RepoEntry {
+            name: "repo".to_string(),
+            path: "/tmp/factory-repo-check-missing-path".to_string(),
+            github: "org/repo".to_string(),
+            hook_id: None,
+            enabled: true,
+        };
+        let results = repo_check_results(&repo, true);
+        assert!(results
+            .iter()
+            .any(|(l, m)| *l == "FAIL" && m.contains("path missing")));
+        assert!(results
+            .iter()
+            .any(|(l, m)| *l == "FAIL" && m.contains("hook_id missing")));
     }
 }

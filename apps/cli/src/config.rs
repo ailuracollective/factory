@@ -145,8 +145,8 @@ impl Default for Config {
                 funnel_url: String::new(),
             },
             defaults: Defaults {
-                provider: "opencode".to_string(),
-                model: "opencode/beam-free".to_string(),
+                provider: "opencode-go".to_string(),
+                model: "opencode-go/iceman-contributor-free".to_string(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
                 max_attempts: 3,
