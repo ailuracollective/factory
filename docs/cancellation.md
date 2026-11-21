@@ -14,7 +14,7 @@ factory cancel --repo <owner/repo> --pr <number> [--force]
 
 - Prefer an explicit execution ID. Context-only selection succeeds only when exactly one cancellable execution matches; otherwise Factory returns an ambiguity error listing candidate IDs.
 - Default cancellation targets one execution. Bulk/cascading cancellation is out of scope.
-- `--force` escalates termination for the owned process group (SIGTERM then SIGKILL on Unix). It does not reset/clean worktrees, delete branches, or delete/close PRs.
+- `--force` first requests normal termination, then escalates after 10 seconds (SIGTERM/SIGKILL for Unix process groups; `taskkill /T` then `/F` for Windows process trees). Other platforms can terminate only the directly owned child process. It does not reset/clean worktrees, delete branches, or delete/close PRs.
 - Repeated requests are idempotent and report existing cancellation state.
 - `factory stop` remains daemon control; it does not cancel individual executions.
 
@@ -32,7 +32,7 @@ factory cancel --repo <owner/repo> --pr <number> [--force]
 
 ## Safety and limitations
 
-- Cancellation stops owned agent process groups only; it does not kill unrelated processes.
+- Cancellation stops only the owned agent process group/tree on Unix and Windows; on other platforms it stops only the direct child. It does not kill unrelated processes.
 - Worktrees, uncommitted changes, commits, branches, existing PRs, and audit records are preserved by default.
 - Already-published GitHub effects are not rolled back automatically.
 - Connected runners observe gateway cancellation via heartbeat; on network loss, runners do not report false cancelled success.

@@ -878,16 +878,18 @@ impl Dispatcher for AgentDispatcher {
             .as_ref()
             .map(|s| s.attempts.saturating_add(1))
             .unwrap_or(1);
-        let exec = crate::execution::create_execution(
-            &issue_key,
-            &event.repo,
-            event.number as i64,
-            attempt,
-            Some(&format!("github:{}", event.author)),
-            Some("local"),
-            Some(&format!("mention:{}:{}", event.kind.label(), event.id)),
-        )
-        .ok();
+        let exec = Some(
+            crate::execution::create_execution(
+                &issue_key,
+                &event.repo,
+                event.number as i64,
+                attempt,
+                Some(&format!("github:{}", event.author)),
+                Some("local"),
+                Some(&format!("mention:{}:{}", event.kind.label(), event.id)),
+            )
+            .map_err(|e| format!("failed to register execution: {e}"))?,
+        );
         let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
         let issue = serde_json::json!({
             "number": event.number,

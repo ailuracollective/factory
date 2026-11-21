@@ -330,7 +330,7 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
             rec.map(|r| r.attempts).unwrap_or(1),
         )
     };
-    let exec = crate::execution::create_execution(
+    let exec = match crate::execution::create_execution(
         &key,
         &repo,
         number,
@@ -338,9 +338,22 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
         Some("webhook"),
         Some("local"),
         Some(&format!("webhook:{event}:{action}")),
-    )
-    .ok();
-    let exec_id = exec.as_ref().map(|e| e.execution_id.clone());
+    ) {
+        Ok(exec) => exec,
+        Err(e) => {
+            let mut issues = state.issues.lock().unwrap();
+            if let Some(rec) = issues.get_mut(&key) {
+                rec.status = IssueStatus::Failed;
+                rec.last_error = Some(format!("failed to register execution: {e}"));
+                rec.updated_at = crate::state::now();
+            }
+            let snapshot = issues.clone();
+            drop(issues);
+            let _ = save_state(&snapshot);
+            return format!("failed to register execution: {e}");
+        }
+    };
+    let exec_id = Some(exec.execution_id.clone());
     let issue_for_launch = issue.clone();
     let project_for_launch = project.clone();
     let config_for_launch = state.config.clone();

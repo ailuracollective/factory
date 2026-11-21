@@ -366,21 +366,26 @@ pub fn transition_execution(
             bail!("invalid transition {current:?} -> {next:?} for {id}");
         }
         let now = state::now() as i64;
-        let mut am: ExecutionActiveModel = row.into();
-        am.status = Set(next.as_str().to_string());
-        am.updated_at = Set(now);
-        if let Some(r) = reason {
-            if next.is_terminal() {
-                am.reason = Set(Some(r));
-            }
-        }
-        if let Some(tid) = thread_id {
-            am.thread_id = Set(Some(tid));
-        }
-        if next.is_terminal() {
-            am.ended_at = Set(Some(now));
-        }
-        let updated = am.update(&db).await?;
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE executions SET status=?, updated_at=?, reason=CASE WHEN ? IS NULL THEN reason ELSE ? END, thread_id=COALESCE(?, thread_id), ended_at=CASE WHEN ? THEN ? ELSE ended_at END WHERE execution_id=? AND status=?",
+            [
+                next.as_str().into(),
+                now.into(),
+                reason.clone().into(),
+                reason.into(),
+                thread_id.into(),
+                next.is_terminal().into(),
+                now.into(),
+                id.clone().into(),
+                current.as_str().into(),
+            ],
+        ))
+        .await?;
+        let updated = ExecutionEntity::find_by_id(id.clone())
+            .one(&db)
+            .await?
+            .ok_or_else(|| anyhow!("execution disappeared during transition"))?;
         Ok(ExecutionRecord::from_model(updated))
     })
 }
@@ -417,44 +422,31 @@ pub fn request_cancel(
             });
         }
         let now = state::now() as i64;
-        let mut am: ExecutionActiveModel = row.clone().into();
-        am.cancel_requested = Set(1);
-        if row.cancel_requested_by.is_none() {
-            am.cancel_requested_by = Set(Some(requested_by.clone()));
-        }
-        if row.cancel_requested_at.is_none() {
-            am.cancel_requested_at = Set(Some(now));
-        }
-        if let Some(r) = reason.clone() {
-            am.cancel_reason = Set(Some(r));
-        }
-        am.updated_at = Set(now);
-        let _new_status = match current {
-            ExecutionStatus::Queued => {
-                am.status = Set(ExecutionStatus::Cancelled.as_str().to_string());
-                am.ended_at = Set(Some(now));
-                am.cancel_confirmed_at = Set(Some(now));
-                am.cancel_outcome = Set(Some("cancelled_before_start".to_string()));
-                ExecutionStatus::Cancelled
-            }
-            ExecutionStatus::Running => {
-                am.status = Set(ExecutionStatus::Cancelling.as_str().to_string());
-                am.cancel_outcome = Set(Some(if force {
-                    "force_requested".to_string()
-                } else {
-                    "cancel_requested".to_string()
-                }));
-                ExecutionStatus::Cancelling
-            }
-            ExecutionStatus::Cancelling => {
-                if force {
-                    am.cancel_outcome = Set(Some("force_requested".to_string()));
-                }
-                ExecutionStatus::Cancelling
-            }
-            _ => current,
+        let outcome = if force {
+            "force_requested"
+        } else {
+            "cancel_requested"
         };
-        let updated = am.update(&db).await?;
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE executions SET status=CASE WHEN status='queued' THEN 'cancelled' WHEN status='running' THEN 'cancelling' ELSE status END, cancel_requested=1, cancel_requested_by=COALESCE(cancel_requested_by, ?), cancel_requested_at=COALESCE(cancel_requested_at, ?), cancel_reason=COALESCE(?, cancel_reason), cancel_confirmed_at=CASE WHEN status='queued' THEN ? ELSE cancel_confirmed_at END, cancel_outcome=CASE WHEN status='queued' THEN 'cancelled_before_start' WHEN status='cancelling' AND ?=0 THEN cancel_outcome ELSE ? END, ended_at=CASE WHEN status='queued' THEN ? ELSE ended_at END, updated_at=? WHERE execution_id=? AND status IN ('queued','running','cancelling')",
+            [
+                requested_by.into(),
+                now.into(),
+                reason.into(),
+                now.into(),
+                force.into(),
+                outcome.into(),
+                now.into(),
+                now.into(),
+                id.clone().into(),
+            ],
+        ))
+        .await?;
+        let updated = ExecutionEntity::find_by_id(id.clone())
+            .one(&db)
+            .await?
+            .ok_or_else(|| anyhow!("execution disappeared during cancellation"))?;
         let rec = ExecutionRecord::from_model(updated);
         let (confirmed, message) = match rec.status {
             ExecutionStatus::Cancelled => (true, "execution cancelled".to_string()),
@@ -484,7 +476,7 @@ pub fn mark_cancel_confirmed(execution_id: &str, outcome: &str) -> Result<Option
     let outcome = outcome.to_string();
     run_async(async move {
         let db = connect(&path).await?;
-        let row = match ExecutionEntity::find_by_id(id).one(&db).await? {
+        let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -493,13 +485,22 @@ pub fn mark_cancel_confirmed(execution_id: &str, outcome: &str) -> Result<Option
             return Ok(Some(ExecutionRecord::from_model(row)));
         }
         let now = state::now() as i64;
-        let mut am: ExecutionActiveModel = row.into();
-        am.status = Set(ExecutionStatus::Cancelled.as_str().to_string());
-        am.cancel_confirmed_at = Set(Some(now));
-        am.cancel_outcome = Set(Some(outcome));
-        am.updated_at = Set(now);
-        am.ended_at = Set(Some(now));
-        let updated = am.update(&db).await?;
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE executions SET status='cancelled', cancel_confirmed_at=?, cancel_outcome=?, updated_at=?, ended_at=? WHERE execution_id=? AND status IN ('queued','running','cancelling')",
+            [
+                now.into(),
+                outcome.into(),
+                now.into(),
+                now.into(),
+                id.clone().into(),
+            ],
+        ))
+        .await?;
+        let updated = ExecutionEntity::find_by_id(id)
+            .one(&db)
+            .await?
+            .ok_or_else(|| anyhow!("execution disappeared while confirming cancellation"))?;
         Ok(Some(ExecutionRecord::from_model(updated)))
     })
 }
@@ -513,7 +514,7 @@ pub fn mark_cancel_unconfirmed(
     let outcome = outcome.to_string();
     run_async(async move {
         let db = connect(&path).await?;
-        let row = match ExecutionEntity::find_by_id(id).one(&db).await? {
+        let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -541,7 +542,7 @@ pub fn complete_execution(
     let pr_url = pr_url.map(|s| s.to_string());
     run_async(async move {
         let db = connect(&path).await?;
-        let row = match ExecutionEntity::find_by_id(id).one(&db).await? {
+        let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -550,17 +551,22 @@ pub fn complete_execution(
             return Ok(Some(ExecutionRecord::from_model(row)));
         }
         let now = state::now() as i64;
-        let mut am: ExecutionActiveModel = row.into();
-        am.status = Set(ExecutionStatus::Completed.as_str().to_string());
-        if let Some(tid) = thread_id {
-            am.thread_id = Set(Some(tid));
-        }
-        if let Some(pr) = pr_url {
-            am.pr_url = Set(Some(pr));
-        }
-        am.updated_at = Set(now);
-        am.ended_at = Set(Some(now));
-        let updated = am.update(&db).await?;
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE executions SET status='completed', thread_id=COALESCE(?, thread_id), pr_url=COALESCE(?, pr_url), updated_at=?, ended_at=? WHERE execution_id=? AND status='running'",
+            [
+                thread_id.into(),
+                pr_url.into(),
+                now.into(),
+                now.into(),
+                id.clone().into(),
+            ],
+        ))
+        .await?;
+        let updated = ExecutionEntity::find_by_id(id)
+            .one(&db)
+            .await?
+            .ok_or_else(|| anyhow!("execution disappeared while completing"))?;
         Ok(Some(ExecutionRecord::from_model(updated)))
     })
 }
@@ -571,7 +577,7 @@ pub fn fail_execution(execution_id: &str, error: &str) -> Result<Option<Executio
     let error = error.to_string();
     run_async(async move {
         let db = connect(&path).await?;
-        let row = match ExecutionEntity::find_by_id(id).one(&db).await? {
+        let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -580,12 +586,16 @@ pub fn fail_execution(execution_id: &str, error: &str) -> Result<Option<Executio
             return Ok(Some(ExecutionRecord::from_model(row)));
         }
         let now = state::now() as i64;
-        let mut am: ExecutionActiveModel = row.into();
-        am.status = Set(ExecutionStatus::Failed.as_str().to_string());
-        am.reason = Set(Some(error));
-        am.updated_at = Set(now);
-        am.ended_at = Set(Some(now));
-        let updated = am.update(&db).await?;
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE executions SET status='failed', reason=?, updated_at=?, ended_at=? WHERE execution_id=? AND status='running'",
+            [error.into(), now.into(), now.into(), id.clone().into()],
+        ))
+        .await?;
+        let updated = ExecutionEntity::find_by_id(id.clone())
+            .one(&db)
+            .await?
+            .ok_or_else(|| anyhow!("execution disappeared while failing"))?;
         Ok(Some(ExecutionRecord::from_model(updated)))
     })
 }
@@ -694,6 +704,23 @@ mod tests {
     }
 
     #[test]
+    fn execution_registration_reports_database_failure() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let parent = std::env::temp_dir().join(format!(
+            "factory_exec_not_a_dir_{}",
+            uuid::Uuid::now_v7().simple()
+        ));
+        fs::write(&parent, "file").unwrap();
+        let db_path = parent.join("factory.db");
+        std::env::set_var("ISSUE_FACTORY_DB_FILE", db_path.to_str().unwrap());
+        assert!(create_execution("org/repo#1", "org/repo", 1, 1, None, None, None).is_err());
+        fs::remove_file(parent).unwrap();
+        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+    }
+
+    #[test]
     fn queued_cancel_is_immediate_and_idempotent() {
         with_temp_db(|| {
             let rec = create_execution(
@@ -712,6 +739,15 @@ mod tests {
             let r2 = request_cancel(&rec.execution_id, "cli:alice", false, Some("stop")).unwrap();
             assert_eq!(r2.status, ExecutionStatus::Cancelled);
             assert!(r2.confirmed);
+            let stale_start = transition_execution(
+                &rec.execution_id,
+                Some(ExecutionStatus::Queued),
+                ExecutionStatus::Running,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(stale_start.status, ExecutionStatus::Cancelled);
         });
     }
 
@@ -744,6 +780,10 @@ mod tests {
                 .unwrap();
             assert_eq!(done.status, ExecutionStatus::Cancelled);
             assert!(done.cancel_confirmed_at.is_some());
+            let late_completion = complete_execution(&rec.execution_id, Some("late"), None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(late_completion.status, ExecutionStatus::Cancelled);
         });
     }
 

@@ -476,7 +476,7 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
         .as_ref()
         .map(|s| s.attempts.saturating_add(1))
         .unwrap_or(1);
-    let exec = crate::execution::create_execution(
+    let exec = Some(crate::execution::create_execution(
         &key,
         &repo_entry.github,
         issue as i64,
@@ -484,8 +484,7 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
         Some("cli"),
         Some("local"),
         Some("manual test"),
-    )
-    .ok();
+    )?);
     let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
     let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
         issue: &issue_data,
@@ -549,7 +548,7 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
     // build a minimal issue-like object
     let issue = serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
     let key = format!("{}#0", repo_entry.github);
-    let exec = crate::execution::create_execution(
+    let exec = Some(crate::execution::create_execution(
         &key,
         &repo_entry.github,
         0,
@@ -557,8 +556,7 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
         Some("cli"),
         Some("local"),
         Some("custom prompt"),
-    )
-    .ok();
+    )?);
     let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
     let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
         issue: &issue,
@@ -844,7 +842,7 @@ pub fn runner(once: bool) -> Result<()> {
                     .as_ref()
                     .map(|s| s.attempts.saturating_add(1))
                     .unwrap_or(1);
-                let exec = crate::execution::create_execution(
+                let exec = Some(crate::execution::create_execution(
                     &key,
                     &repo,
                     number,
@@ -852,8 +850,7 @@ pub fn runner(once: bool) -> Result<()> {
                     Some(&format!("runner:{runner_id}")),
                     Some(&runner_id),
                     Some(&format!("gateway-job:{job_id}")),
-                )
-                .ok();
+                )?);
                 let exec_id = exec.as_ref().map(|e| e.execution_id.clone());
 
                 let stop = std::sync::Arc::new(AtomicBool::new(false));

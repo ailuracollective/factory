@@ -41,6 +41,7 @@ pub fn build_prompt(issue: &Value) -> String {
 #[derive(Debug, Clone)]
 struct RunningProcess {
     pgid: u32,
+    child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 fn registry() -> &'static Mutex<HashMap<String, RunningProcess>> {
@@ -52,7 +53,7 @@ pub fn is_execution_running(execution_id: &str) -> bool {
     registry().lock().unwrap().contains_key(execution_id)
 }
 
-pub fn cancel_running_execution(execution_id: &str, force: bool) -> Result<bool, String> {
+pub fn cancel_running_execution(execution_id: &str, _force: bool) -> Result<bool, String> {
     let proc = {
         let reg = registry().lock().unwrap();
         reg.get(execution_id).cloned()
@@ -60,11 +61,7 @@ pub fn cancel_running_execution(execution_id: &str, force: bool) -> Result<bool,
     let Some(proc) = proc else {
         return Ok(false);
     };
-    signal_process_group(proc.pgid, if force { Signal::Kill } else { Signal::Term })?;
-    if force {
-        // Escalate immediately for --force; normal path can be escalated by caller.
-        let _ = signal_process_group(proc.pgid, Signal::Kill);
-    }
+    signal_owned_process(&proc.child, proc.pgid, Signal::Term)?;
     Ok(true)
 }
 
@@ -74,6 +71,7 @@ enum Signal {
     Kill,
 }
 
+#[cfg(unix)]
 fn signal_process_group(pgid: u32, sig: Signal) -> Result<(), String> {
     let sig_arg = match sig {
         Signal::Term => "-TERM",
@@ -92,6 +90,56 @@ fn signal_process_group(pgid: u32, sig: Signal) -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
+fn signal_process_group(pgid: u32, sig: Signal) -> Result<(), String> {
+    let pid = pgid.to_string();
+    let mut cmd = Command::new("taskkill");
+    cmd.args(["/PID", &pid, "/T"]);
+    if matches!(sig, Signal::Kill) {
+        cmd.arg("/F");
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("failed to stop process tree {pgid}: {e}"))?;
+    if !status.success() {
+        return Err(format!("taskkill failed for process tree {pgid}"));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn signal_process_group(_pgid: u32, _sig: Signal) -> Result<(), String> {
+    Err("process-tree cancellation is unsupported on this platform".to_string())
+}
+
+fn signal_owned_process(
+    child: &Arc<Mutex<Option<std::process::Child>>>,
+    pgid: u32,
+    sig: Signal,
+) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let _ = child;
+        signal_process_group(pgid, sig)
+    }
+    #[cfg(windows)]
+    {
+        let _ = child;
+        signal_process_group(pgid, sig)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pgid;
+        let mut guard = child.lock().unwrap();
+        match guard.as_mut() {
+            Some(child) => child
+                .kill()
+                .map_err(|e| format!("failed to stop owned process: {e}")),
+            None => Ok(()),
+        }
+    }
+}
+
 #[cfg(unix)]
 fn configure_process_group(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -101,11 +149,11 @@ fn configure_process_group(cmd: &mut Command) {
 #[cfg(not(unix))]
 fn configure_process_group(_cmd: &mut Command) {}
 
-fn register_process(execution_id: &str, pgid: u32) {
+fn register_process(execution_id: &str, child: Arc<Mutex<Option<std::process::Child>>>, pgid: u32) {
     registry()
         .lock()
         .unwrap()
-        .insert(execution_id.to_string(), RunningProcess { pgid });
+        .insert(execution_id.to_string(), RunningProcess { pgid, child });
 }
 
 fn unregister_process(execution_id: &str) {
@@ -294,6 +342,24 @@ fn output_detail(stdout: &[u8], stderr: &[u8]) -> String {
     detail.chars().take(2000).collect()
 }
 
+const MAX_CAPTURED_OUTPUT: usize = 1024 * 1024;
+
+fn read_bounded_tail(reader: &mut impl Read, output: &mut Vec<u8>) {
+    let mut chunk = [0; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                output.extend_from_slice(&chunk[..n]);
+                if output.len() > MAX_CAPTURED_OUTPUT {
+                    let excess = output.len() - MAX_CAPTURED_OUTPUT;
+                    output.drain(..excess);
+                }
+            }
+        }
+    }
+}
+
 fn run_supervised_command(
     mut cmd: Command,
     execution_id: Option<&str>,
@@ -310,20 +376,20 @@ fn run_supervised_command(
     let stderr_pipe = child.stderr.take();
     let child = Arc::new(Mutex::new(Some(child)));
     if let Some(exec_id) = execution_id {
-        register_process(exec_id, pgid);
+        register_process(exec_id, child.clone(), pgid);
     }
 
     let stdout_handle = std::thread::spawn(move || -> Vec<u8> {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stdout_pipe {
-            let _ = pipe.read_to_end(&mut buf);
+            read_bounded_tail(&mut pipe, &mut buf);
         }
         buf
     });
     let stderr_handle = std::thread::spawn(move || -> Vec<u8> {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
-            let _ = pipe.read_to_end(&mut buf);
+            read_bounded_tail(&mut pipe, &mut buf);
         }
         buf
     });
@@ -340,7 +406,7 @@ fn run_supervised_command(
                     cancel_seen_at = Some(std::time::Instant::now());
                 }
                 if !cancel_sent {
-                    let _ = signal_process_group(pgid, Signal::Term);
+                    let _ = signal_owned_process(&child, pgid, Signal::Term);
                     cancel_sent = true;
                 }
                 let force_now = execution::get_execution(exec_id)
@@ -350,7 +416,7 @@ fn run_supervised_command(
                     .map(|o| o == "force_requested")
                     .unwrap_or(false);
                 if force_now && !force_sent {
-                    let _ = signal_process_group(pgid, Signal::Kill);
+                    let _ = signal_owned_process(&child, pgid, Signal::Kill);
                     force_sent = true;
                 }
                 if !force_sent
@@ -358,7 +424,7 @@ fn run_supervised_command(
                         .map(|t| t.elapsed() >= force_after)
                         .unwrap_or(false)
                 {
-                    let _ = signal_process_group(pgid, Signal::Kill);
+                    let _ = signal_owned_process(&child, pgid, Signal::Kill);
                     force_sent = true;
                 }
             }
@@ -458,6 +524,15 @@ mod tests {
     fn parse_thread_id_json() {
         let out = r#"{"threadId":"thread-1"}"#;
         assert_eq!(parse_thread_id(out), Some("thread-1".to_string()));
+    }
+
+    #[test]
+    fn captured_output_keeps_only_the_tail() {
+        let mut captured = Vec::new();
+        let input = vec![b'a'; MAX_CAPTURED_OUTPUT + 7];
+        read_bounded_tail(&mut input.as_slice(), &mut captured);
+        assert_eq!(captured.len(), MAX_CAPTURED_OUTPUT);
+        assert!(captured.iter().all(|b| *b == b'a'));
     }
 
     #[test]
