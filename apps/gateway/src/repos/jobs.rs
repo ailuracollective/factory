@@ -106,7 +106,7 @@ pub async fn heartbeat(
     let res = conn
         .execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "UPDATE jobs SET status=?, lease_until=?, updated_at=? WHERE id=? AND runner_id=?",
+            "UPDATE jobs SET status=CASE WHEN status IN ('cancelled','cancelling') THEN status ELSE ? END, lease_until=?, updated_at=? WHERE id=? AND runner_id=?",
             [
                 status.into(),
                 lease.into(),
@@ -129,7 +129,7 @@ pub async fn complete(
     let res = conn
         .execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "UPDATE jobs SET status='completed', thread_id=?, updated_at=?, last_error=NULL WHERE id=? AND runner_id=?",
+            "UPDATE jobs SET status='completed', thread_id=?, updated_at=?, last_error=NULL WHERE id=? AND runner_id=? AND status NOT IN ('cancelled','cancelling','completed','failed')",
             [
                 thread_id.map(|s| s.to_string()).into(),
                 ts.into(),
@@ -151,7 +151,7 @@ pub async fn fail(
     let res = conn
         .execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "UPDATE jobs SET status='failed', last_error=?, updated_at=? WHERE id=? AND runner_id=?",
+            "UPDATE jobs SET status='failed', last_error=?, updated_at=? WHERE id=? AND runner_id=? AND status NOT IN ('cancelled','cancelling','completed','failed')",
             [error.into(), ts.into(), id.into(), runner_id.into()],
         ))
         .await?;
@@ -162,11 +162,26 @@ pub async fn cancel(conn: &DatabaseConnection, id: &str, ts: i64) -> Result<u64,
     let res = conn
         .execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "UPDATE jobs SET status='cancelled', updated_at=? WHERE id=?",
+            "UPDATE jobs SET status='cancelled', updated_at=? WHERE id=? AND status NOT IN ('completed','failed','cancelled')",
             [ts.into(), id.into()],
         ))
         .await?;
     Ok(res.rows_affected())
+}
+
+pub async fn cancel_status(
+    conn: &DatabaseConnection,
+    id: &str,
+) -> Result<Option<String>, sea_orm::DbErr> {
+    #[derive(FromQueryResult)]
+    struct Row {
+        status: String,
+    }
+    let row = job::Entity::find_by_id(id.to_string())
+        .into_model::<Row>()
+        .one(conn)
+        .await?;
+    Ok(row.map(|r| r.status))
 }
 
 pub async fn list(conn: &DatabaseConnection) -> Result<Vec<Value>, sea_orm::DbErr> {

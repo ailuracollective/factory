@@ -31,7 +31,7 @@ Optional configuration:
   `403`. An empty `allowed_users` policy never bypasses permission checks.
 - Webhook repository scope is validated against `GITHUB_ALLOWED_REPOS` (when
   set), the optional installation id, and a live GitHub repository lookup.
-- Every admin route, including cancellation, goes through the same token guard.
+- Every admin route, including cancellation, goes through the same token guard. Cancellation is idempotent for already-cancelled jobs and does not overwrite terminal `completed`/`failed` states.
 - Runner registration requires the bootstrap secret; tokens are generated with
   the platform CSPRNG (`crypto.getRandomValues`) and only their SHA-256 hash is
   stored in D1.

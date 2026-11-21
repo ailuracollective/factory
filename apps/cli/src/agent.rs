@@ -1,8 +1,13 @@
 use serde_json::Value;
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::config::Config;
+use crate::execution;
 
 fn slugify(text: &str) -> String {
     let slug: String = text
@@ -33,6 +38,90 @@ pub fn build_prompt(issue: &Value) -> String {
     )
 }
 
+#[derive(Debug, Clone)]
+struct RunningProcess {
+    pgid: u32,
+}
+
+fn registry() -> &'static Mutex<HashMap<String, RunningProcess>> {
+    static REG: OnceLock<Mutex<HashMap<String, RunningProcess>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn is_execution_running(execution_id: &str) -> bool {
+    registry().lock().unwrap().contains_key(execution_id)
+}
+
+pub fn cancel_running_execution(execution_id: &str, force: bool) -> Result<bool, String> {
+    let proc = {
+        let reg = registry().lock().unwrap();
+        reg.get(execution_id).cloned()
+    };
+    let Some(proc) = proc else {
+        return Ok(false);
+    };
+    signal_process_group(proc.pgid, if force { Signal::Kill } else { Signal::Term })?;
+    if force {
+        // Escalate immediately for --force; normal path can be escalated by caller.
+        let _ = signal_process_group(proc.pgid, Signal::Kill);
+    }
+    Ok(true)
+}
+
+#[derive(Clone, Copy)]
+enum Signal {
+    Term,
+    Kill,
+}
+
+fn signal_process_group(pgid: u32, sig: Signal) -> Result<(), String> {
+    let sig_arg = match sig {
+        Signal::Term => "-TERM",
+        Signal::Kill => "-KILL",
+    };
+    let target = format!("-{}", pgid);
+    let status = Command::new("kill")
+        .args([sig_arg, &target])
+        .status()
+        .map_err(|e| format!("failed to signal process group {pgid}: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        // Process may have already exited; treat as non-fatal.
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn configure_process_group(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_cmd: &mut Command) {}
+
+fn register_process(execution_id: &str, pgid: u32) {
+    registry()
+        .lock()
+        .unwrap()
+        .insert(execution_id.to_string(), RunningProcess { pgid });
+}
+
+fn unregister_process(execution_id: &str) {
+    registry().lock().unwrap().remove(execution_id);
+}
+
+pub struct AgentLaunchRequest<'a> {
+    pub issue: &'a Value,
+    pub project: &'a Path,
+    pub config: &'a Config,
+    pub prompt: Option<&'a str>,
+    pub existing_thread: Option<&'a str>,
+    pub attempt: u32,
+    pub execution_id: Option<&'a str>,
+}
+
 pub fn launch_agent(
     issue: &Value,
     project: &Path,
@@ -41,6 +130,28 @@ pub fn launch_agent(
     existing_thread: Option<&str>,
     attempt: u32,
 ) -> Result<String, String> {
+    launch_agent_with_execution(AgentLaunchRequest {
+        issue,
+        project,
+        config,
+        prompt,
+        existing_thread,
+        attempt,
+        execution_id: None,
+    })
+}
+
+pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String, String> {
+    let AgentLaunchRequest {
+        issue,
+        project,
+        config,
+        prompt,
+        existing_thread,
+        attempt,
+        execution_id,
+    } = req;
+
     let number = issue
         .get("number")
         .and_then(|v| v.as_i64())
@@ -56,6 +167,20 @@ pub fn launch_agent(
     };
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
 
+    if let Some(exec_id) = execution_id {
+        if execution::is_cancel_requested(exec_id) {
+            let _ = execution::mark_cancel_confirmed(exec_id, "cancelled_before_launch");
+            return Err("execution cancelled before launch".to_string());
+        }
+        let _ = execution::transition_execution(
+            exec_id,
+            Some(execution::ExecutionStatus::Queued),
+            execution::ExecutionStatus::Running,
+            None,
+            None,
+        );
+    }
+
     if let Some(thread_id) = existing_thread.filter(|t| !t.trim().is_empty()) {
         tracing::info!(
             "Sending mention to existing thread {} for issue #{}",
@@ -70,19 +195,14 @@ pub fn launch_agent(
             .arg("--wait")
             .arg("--json")
             .current_dir(project);
-        match cmd.output() {
-            Ok(o) if o.status.success() => return Ok(thread_id.to_string()),
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let stdout = String::from_utf8_lossy(&o.stdout);
+        match run_supervised_command(cmd, execution_id, "t3 thread send") {
+            Ok(out) if out.status.success() => return Ok(thread_id.to_string()),
+            Ok(out) => {
+                let detail = output_detail(&out.stdout, &out.stderr);
                 tracing::warn!(
                     "t3 thread send failed for issue #{}, falling back to start: {}",
                     number,
-                    if stderr.trim().is_empty() {
-                        stdout.trim()
-                    } else {
-                        stderr.trim()
-                    }
+                    detail
                 );
             }
             Err(e) => tracing::warn!(
@@ -137,23 +257,9 @@ pub fn launch_agent(
         project.display()
     );
 
-    let output = match cmd.output() {
-        Ok(o) => o,
-        Err(e) => {
-            let msg = format!("Failed to launch t3: {e}");
-            tracing::error!("{}", msg);
-            return Err(msg);
-        }
-    };
-
+    let output = run_supervised_command(cmd, execution_id, "t3 thread start")?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if stderr.trim().is_empty() {
-            stdout.trim()
-        } else {
-            stderr.trim()
-        };
+        let detail = output_detail(&output.stdout, &output.stderr);
         let msg = format!("t3 failed for issue #{number}: {detail}");
         tracing::error!("{}", msg);
         return Err(msg);
@@ -169,6 +275,136 @@ pub fn launch_agent(
         tracing::warn!("{}", msg);
         Err(msg)
     }
+}
+
+struct CommandOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+fn output_detail(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let stdout = String::from_utf8_lossy(stdout);
+    let detail = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    detail.chars().take(2000).collect()
+}
+
+fn run_supervised_command(
+    mut cmd: Command,
+    execution_id: Option<&str>,
+    label: &str,
+) -> Result<CommandOutput, String> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    configure_process_group(&mut cmd);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to launch {label}: {e}"))?;
+    let pgid = child.id();
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let child = Arc::new(Mutex::new(Some(child)));
+    if let Some(exec_id) = execution_id {
+        register_process(exec_id, pgid);
+    }
+
+    let stdout_handle = std::thread::spawn(move || -> Vec<u8> {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_handle = std::thread::spawn(move || -> Vec<u8> {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let mut cancel_sent = false;
+    let mut force_sent = false;
+    let mut cancel_seen_at: Option<std::time::Instant> = None;
+    let force_after = Duration::from_secs(10);
+
+    let status = loop {
+        if let Some(exec_id) = execution_id {
+            if execution::is_cancel_requested(exec_id) {
+                if cancel_seen_at.is_none() {
+                    cancel_seen_at = Some(std::time::Instant::now());
+                }
+                if !cancel_sent {
+                    let _ = signal_process_group(pgid, Signal::Term);
+                    cancel_sent = true;
+                }
+                let force_now = execution::get_execution(exec_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r.cancel_outcome.clone())
+                    .map(|o| o == "force_requested")
+                    .unwrap_or(false);
+                if force_now && !force_sent {
+                    let _ = signal_process_group(pgid, Signal::Kill);
+                    force_sent = true;
+                }
+                if !force_sent
+                    && cancel_seen_at
+                        .map(|t| t.elapsed() >= force_after)
+                        .unwrap_or(false)
+                {
+                    let _ = signal_process_group(pgid, Signal::Kill);
+                    force_sent = true;
+                }
+            }
+        }
+
+        let maybe_status = {
+            let mut guard = child.lock().unwrap();
+            match guard.as_mut() {
+                Some(c) => c.try_wait().map_err(|e| format!("wait failed: {e}"))?,
+                None => None,
+            }
+        };
+        if let Some(status) = maybe_status {
+            break status;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+
+    if let Some(exec_id) = execution_id {
+        unregister_process(exec_id);
+    }
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+
+    if let Some(exec_id) = execution_id {
+        if execution::is_cancel_requested(exec_id) {
+            let _ = execution::mark_cancel_confirmed(
+                exec_id,
+                if force_sent {
+                    "force_killed"
+                } else {
+                    "cancelled"
+                },
+            );
+            return Err("execution cancelled".to_string());
+        }
+    }
+
+    // Reap: child already exited; drop handle.
+    let _ = child.lock().unwrap().take();
+    Ok(CommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn parse_thread_id(output: &str) -> Option<String> {
@@ -222,5 +458,67 @@ mod tests {
     fn parse_thread_id_json() {
         let out = r#"{"threadId":"thread-1"}"#;
         assert_eq!(parse_thread_id(out), Some("thread-1".to_string()));
+    }
+
+    #[test]
+    fn supervised_launch_can_be_cancelled() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!(
+            "factory_agent_cancel_{}.db",
+            uuid::Uuid::now_v7().simple()
+        ));
+        let _ = std::fs::remove_file(&tmp);
+        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+
+        let script = std::env::temp_dir().join(format!("factory_sleep_{}.sh", std::process::id()));
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap());
+
+        let config = crate::config::Config::default();
+        let issue = serde_json::json!({"number": 1, "title": "t", "url": "u"});
+        let project = std::env::temp_dir();
+        let exec = crate::execution::create_execution(
+            "org/repo#1",
+            "org/repo",
+            1,
+            1,
+            Some("cli"),
+            Some("local"),
+            None,
+        )
+        .unwrap();
+        let exec_id = exec.execution_id.clone();
+
+        let handle = std::thread::spawn(move || {
+            launch_agent_with_execution(AgentLaunchRequest {
+                issue: &issue,
+                project: &project,
+                config: &config,
+                prompt: Some("p"),
+                existing_thread: None,
+                attempt: 1,
+                execution_id: Some(&exec_id),
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = crate::execution::request_cancel(&exec.execution_id, "test", false, Some("test"));
+        let res = handle.join().unwrap();
+        assert!(res.is_err());
+        let rec = crate::execution::get_execution(&exec.execution_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rec.status, crate::execution::ExecutionStatus::Cancelled);
+
+        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_file(&tmp);
+        std::env::remove_var("ISSUE_FACTORY_T3");
+        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
     }
 }

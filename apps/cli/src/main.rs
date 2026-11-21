@@ -88,6 +88,19 @@ enum Commands {
         #[arg(long)]
         prompt: String,
     },
+    /// Cancel a running or queued execution
+    Cancel {
+        /// Execution ID (preferred)
+        execution_id: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        issue: Option<u64>,
+        #[arg(long)]
+        pr: Option<u64>,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -151,6 +164,13 @@ fn main() -> ExitCode {
             prompt,
         } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
+        Commands::Cancel {
+            execution_id,
+            repo,
+            issue,
+            pr,
+            force,
+        } => cli::cancel(execution_id.as_deref(), repo.as_deref(), issue, pr, force),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
