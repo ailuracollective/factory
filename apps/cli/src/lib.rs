@@ -2,6 +2,7 @@ pub mod agent;
 pub mod cli;
 pub mod config;
 pub mod doctor;
+pub mod execution;
 pub mod listener;
 pub mod mentions;
 pub mod repo_manager;

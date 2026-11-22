@@ -151,7 +151,11 @@ pub async fn handle_heartbeat(
             404,
         );
     }
-    json_response(&serde_json::json!({"status": "ok"}), 200)
+    let job_status = jobs::cancel_status(&conn, &id).await.ok().flatten();
+    json_response(
+        &serde_json::json!({"status": "ok", "job_status": job_status}),
+        200,
+    )
 }
 
 #[derive(Deserialize)]

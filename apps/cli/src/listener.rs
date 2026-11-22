@@ -200,7 +200,9 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
             let config = state.config.clone();
             let outcome = tokio::task::spawn_blocking(move || {
                 let store = crate::mentions::SqliteEventStore;
-                let dispatcher = crate::mentions::AgentDispatcher { config: &config };
+                let dispatcher = crate::mentions::AgentDispatcher {
+                    config: config.clone(),
+                };
                 let authorizer = crate::mentions::GhAuthorizer;
                 let engine =
                     crate::mentions::Engine::new(&config, &store, &dispatcher, &authorizer);
@@ -328,19 +330,45 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
             rec.map(|r| r.attempts).unwrap_or(1),
         )
     };
+    let exec = match crate::execution::create_execution(
+        &key,
+        &repo,
+        number,
+        attempt,
+        Some("webhook"),
+        Some("local"),
+        Some(&format!("webhook:{event}:{action}")),
+    ) {
+        Ok(exec) => exec,
+        Err(e) => {
+            let mut issues = state.issues.lock().unwrap();
+            if let Some(rec) = issues.get_mut(&key) {
+                rec.status = IssueStatus::Failed;
+                rec.last_error = Some(format!("failed to register execution: {e}"));
+                rec.updated_at = crate::state::now();
+            }
+            let snapshot = issues.clone();
+            drop(issues);
+            let _ = save_state(&snapshot);
+            return format!("failed to register execution: {e}");
+        }
+    };
+    let exec_id = Some(exec.execution_id.clone());
     let issue_for_launch = issue.clone();
     let project_for_launch = project.clone();
     let config_for_launch = state.config.clone();
     let existing_thread_for_launch = existing_thread.clone();
+    let exec_for_launch = exec_id.clone();
     let launch_result = tokio::task::spawn_blocking(move || {
-        crate::agent::launch_agent(
-            &issue_for_launch,
-            &project_for_launch,
-            &config_for_launch,
-            None,
-            existing_thread_for_launch.as_deref(),
+        crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+            issue: &issue_for_launch,
+            project: &project_for_launch,
+            config: &config_for_launch,
+            prompt: None,
+            existing_thread: existing_thread_for_launch.as_deref(),
             attempt,
-        )
+            execution_id: exec_for_launch.as_deref(),
+        })
     })
     .await;
     let pr_url = existing_pr.or_else(|| crate::mentions::discover_pr_url(&repo, number as u64));
@@ -364,8 +392,8 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
             rec.last_error = failure_message.clone();
             tracing::error!(issue = %key, "launch failed");
         }
-        if let Some(url) = pr_url {
-            rec.pr_url = Some(url);
+        if let Some(ref url) = pr_url {
+            rec.pr_url = Some(url.clone());
         }
         rec.updated_at = crate::state::now();
         let snapshot = issues.clone();
@@ -374,10 +402,21 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
     }
 
     if let Some(err) = failure_message {
+        if let Some(ref id) = exec_id {
+            if crate::execution::is_cancel_requested(id) {
+                let _ = crate::execution::mark_cancel_confirmed(id, "cancelled");
+            } else {
+                let _ = crate::execution::fail_execution(id, &err);
+            }
+        }
         let assignees = issue_assignee_logins(&issue);
         report_launch_failure(&repo, number, &err, &assignees);
         format!("failed {}", key)
     } else {
+        if let Some(ref id) = exec_id {
+            let _ =
+                crate::execution::complete_execution(id, thread_id.as_deref(), pr_url.as_deref());
+        }
         format!("launched {}", key)
     }
 }
@@ -522,6 +561,7 @@ fn issue_matches_label(label: &str, issue: &Value, action: &str, payload: &Value
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod lifecycle_tests {
     use super::*;
     use crate::config::{Config, RepoEntry};

@@ -39,10 +39,28 @@ pub async fn handle_cancel(Path(id): Path<String>, req: &Request, env: &worker::
         Err(_) => return json_response(&serde_json::json!({"error": "db unavailable"}), 500),
     };
     if changes == 0 {
-        return json_response(&serde_json::json!({"error": "job not found"}), 404);
+        return match jobs::cancel_status(&conn, &id).await {
+            Ok(Some(status)) if status == "cancelled" => json_response(
+                &serde_json::json!({"status": "ok", "job_status": "cancelled", "idempotent": true}),
+                200,
+            ),
+            Ok(Some(status)) if status == "completed" || status == "failed" => json_response(
+                &serde_json::json!({"error": "job already terminal", "job_status": status}),
+                409,
+            ),
+            Ok(Some(status)) => json_response(
+                &serde_json::json!({"error": "job not cancellable", "job_status": status}),
+                409,
+            ),
+            Ok(None) => json_response(&serde_json::json!({"error": "job not found"}), 404),
+            Err(_) => json_response(&serde_json::json!({"error": "db unavailable"}), 500),
+        };
     }
     infra::audit(&conn, "job_cancelled", &id).await;
-    json_response(&serde_json::json!({"status": "ok"}), 200)
+    json_response(
+        &serde_json::json!({"status": "ok", "job_status": "cancelled"}),
+        200,
+    )
 }
 
 pub async fn handle_revoke_runner(

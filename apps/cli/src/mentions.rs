@@ -144,6 +144,77 @@ pub fn parse_invocation(body: &str, cfg: &crate::config::MentionsConfig) -> Opti
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CancelInvocation {
+    pub username: String,
+    pub execution_id: Option<String>,
+}
+
+pub fn parse_cancel_invocation(
+    body: &str,
+    cfg: &crate::config::MentionsConfig,
+) -> Option<CancelInvocation> {
+    if body.contains(REPORT_MARKER) {
+        return None;
+    }
+    for username in &cfg.usernames {
+        let username = username.trim().trim_start_matches('@');
+        if username.is_empty() {
+            continue;
+        }
+        let mut search = 0;
+        while let Some(found) = find_mention(&body[search..], username) {
+            let at = search + found;
+            let after = at + 1 + username.len();
+            let rest = body[after..].trim_start();
+            let mut parts = rest.split_whitespace();
+            let first = parts.next().unwrap_or("");
+            let first = first.trim_end_matches(|c: char| {
+                matches!(c, ',' | ':' | ';' | '.' | '!' | '?' | ')' | '"' | '\'')
+            });
+            let expected_cmd = cfg.command.trim().trim_start_matches('/');
+            let (is_cancel, exec_id) =
+                if first.trim_start_matches('/').eq_ignore_ascii_case("cancel") {
+                    (true, parts.next().map(clean_token))
+                } else if first
+                    .trim_start_matches('/')
+                    .eq_ignore_ascii_case(expected_cmd)
+                {
+                    let second = parts.next().unwrap_or("");
+                    let second = second.trim_end_matches(|c: char| {
+                        matches!(c, ',' | ':' | ';' | '.' | '!' | '?' | ')' | '"' | '\'')
+                    });
+                    if second
+                        .trim_start_matches('/')
+                        .eq_ignore_ascii_case("cancel")
+                    {
+                        (true, parts.next().map(clean_token))
+                    } else {
+                        (false, None)
+                    }
+                } else {
+                    (false, None)
+                };
+            if is_cancel {
+                return Some(CancelInvocation {
+                    username: username.to_string(),
+                    execution_id: exec_id.filter(|s| !s.is_empty()),
+                });
+            }
+            search = at + 1;
+        }
+    }
+    None
+}
+
+fn clean_token(s: &str) -> String {
+    s.trim()
+        .trim_end_matches(|c: char| {
+            matches!(c, ',' | ':' | ';' | '.' | '!' | '?' | ')' | '"' | '\'')
+        })
+        .to_string()
+}
+
 /// Byte offset of `@username` with a GitHub-style login boundary.
 fn find_mention(body: &str, username: &str) -> Option<usize> {
     let needle = username.as_bytes();
@@ -239,16 +310,26 @@ impl<'a> Engine<'a> {
                 }
             };
             let mut max_ts = parse_timestamp(&since).unwrap_or(0);
+            let mut cancels = Vec::new();
+            let mut others = Vec::new();
             for event in &events {
                 if let Some(ts) = parse_timestamp(&event.updated_at) {
                     max_ts = max_ts.max(ts);
                 }
+                if parse_cancel_invocation(&event.body, &self.config.mentions).is_some() {
+                    cancels.push(event.clone());
+                } else {
+                    others.push(event.clone());
+                }
+            }
+            for event in &cancels {
+                summary.add(&self.handle(event, now));
+            }
+            for event in &others {
                 summary.add(&self.handle(event, now));
             }
             let cursor_ts = cursor.as_deref().and_then(parse_timestamp).unwrap_or(0);
             if max_ts > 0 && max_ts > cursor_ts {
-                // Overlap slightly so same-second events are not lost; dedupe
-                // by audit key prevents double execution.
                 let next = format_timestamp(max_ts.saturating_sub(CURSOR_OVERLAP_SECS));
                 if let Err(e) = self.store.set_cursor(&repo.github, &next) {
                     tracing::error!(repo = %repo.github, "failed to save mention cursor: {e}");
@@ -265,12 +346,8 @@ impl<'a> Engine<'a> {
             return Outcome::Ignored("duplicate");
         }
         if event.author_is_bot {
-            // Bots (including our own replies) must never cause work.
             return Outcome::Ignored("bot");
         }
-        let Some(invocation) = parse_invocation(&event.body, &self.config.mentions) else {
-            return Outcome::Ignored("no-invocation");
-        };
 
         let known_repo = self.config.repos.iter().any(|r| {
             r.enabled
@@ -278,8 +355,22 @@ impl<'a> Engine<'a> {
                     || r.name.eq_ignore_ascii_case(&event.repo))
         });
         if !known_repo {
-            return self.reject(&key, format!("repo not allowed: {}", event.repo));
+            if parse_cancel_invocation(&event.body, &self.config.mentions).is_some()
+                || parse_invocation(&event.body, &self.config.mentions).is_some()
+            {
+                return self.reject(&key, format!("repo not allowed: {}", event.repo));
+            }
+            return Outcome::Ignored("no-invocation");
         }
+
+        if let Some(cancel) = parse_cancel_invocation(&event.body, &self.config.mentions) {
+            return self.handle_cancel(event, &key, &cancel);
+        }
+
+        let Some(invocation) = parse_invocation(&event.body, &self.config.mentions) else {
+            return Outcome::Ignored("no-invocation");
+        };
+
         if !self.author_allowed(&event.repo, &event.author) {
             return self.reject(
                 &key,
@@ -334,6 +425,132 @@ impl<'a> Engine<'a> {
         }
     }
 
+    fn handle_cancel(&self, event: &TriggerEvent, key: &str, cancel: &CancelInvocation) -> Outcome {
+        let target = if let Some(ref exec_id) = cancel.execution_id {
+            match crate::execution::get_execution(exec_id) {
+                Ok(Some(rec)) if rec.repo.eq_ignore_ascii_case(&event.repo) => rec,
+                Ok(Some(_)) => {
+                    return self.reject(key, "execution does not belong to repo".to_string())
+                }
+                Ok(None) => return self.reject(key, format!("execution not found: {exec_id}")),
+                Err(e) => return self.reject(key, format!("execution lookup failed: {e}")),
+            }
+        } else {
+            let matches = match crate::execution::list_cancellable_for_issue(
+                &event.repo,
+                event.number as i64,
+            ) {
+                Ok(m) => m,
+                Err(e) => return self.reject(key, format!("execution lookup failed: {e}")),
+            };
+            if matches.len() == 1 {
+                matches.into_iter().next().unwrap()
+            } else if matches.is_empty() {
+                return self.reject(key, "no cancellable execution for this context".to_string());
+            } else {
+                let ids = matches
+                    .iter()
+                    .map(|m| m.execution_id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return self.reject(
+                    key,
+                    format!("ambiguous cancel context; specify execution id: {ids}"),
+                );
+            }
+        };
+
+        if !self.cancel_author_allowed(&event.repo, &event.author, Some(&target)) {
+            return self.reject(
+                key,
+                format!(
+                    "unauthorized cancel author @{} in {}",
+                    event.author, event.repo
+                ),
+            );
+        }
+
+        let _ = self.store.record(
+            key,
+            "accepted",
+            &format!(
+                "op=cancel target={} author={}",
+                target.execution_id, event.author
+            ),
+        );
+        let res = crate::execution::request_cancel(
+            &target.execution_id,
+            &format!("github:{}", event.author),
+            false,
+            Some("github mention cancel"),
+        );
+        match res {
+            Ok(r) => {
+                let _ = crate::agent::cancel_running_execution(&target.execution_id, false);
+                let _ = crate::execution::append_audit(crate::execution::ExecutionAuditEvent {
+                    ts: crate::state::now(),
+                    actor: format!("github:{}", event.author),
+                    action: "cancel".to_string(),
+                    target: target.execution_id.clone(),
+                    outcome: r.status.as_str().to_string(),
+                    detail: Some(r.message.clone()),
+                });
+                let _ = self.store.record(
+                    key,
+                    "completed",
+                    &format!(
+                        "op=cancel target={} status={}",
+                        target.execution_id,
+                        r.status.as_str()
+                    ),
+                );
+                self.dispatcher.report(
+                    event,
+                    &format!(
+                        "cancel requested for `{}`: {} (confirmed={})",
+                        target.execution_id, r.message, r.confirmed
+                    ),
+                );
+                Outcome::Launched(target.execution_id)
+            }
+            Err(e) => {
+                let _ = self
+                    .store
+                    .record(key, "failed", &format!("op=cancel failed: {e}"));
+                self.dispatcher.report(
+                    event,
+                    &format!("cancel failed for `{}`: {e}", target.execution_id),
+                );
+                Outcome::Failed(e.to_string())
+            }
+        }
+    }
+
+    fn cancel_author_allowed(
+        &self,
+        _repo: &str,
+        author: &str,
+        target: Option<&crate::execution::ExecutionRecord>,
+    ) -> bool {
+        let cfg = &self.config.mentions;
+        if cfg.usernames.iter().any(|u| login_eq(u, author)) {
+            return true;
+        }
+        if cfg.allowed_authors.iter().any(|u| login_eq(u, author)) {
+            return true;
+        }
+        if let Some(rec) = target {
+            if let Some(req) = rec.requester.as_deref() {
+                if req.eq_ignore_ascii_case(&format!("github:{author}"))
+                    || req.eq_ignore_ascii_case(author)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn reject(&self, key: &str, reason: String) -> Outcome {
         tracing::warn!(reason = %reason, "mention rejected");
         let _ = self.store.record(key, "rejected", &reason);
@@ -359,6 +576,7 @@ fn login_eq(a: &str, b: &str) -> bool {
 }
 
 /// SQLite-backed store used by the CLI.
+#[derive(Clone, Copy)]
 pub struct SqliteEventStore;
 
 impl EventStore for SqliteEventStore {
@@ -605,6 +823,7 @@ pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> 
 }
 
 /// Write-permission check through `gh`. Fails closed.
+#[derive(Clone, Copy)]
 pub struct GhAuthorizer;
 
 impl Authorizer for GhAuthorizer {
@@ -630,11 +849,12 @@ impl Authorizer for GhAuthorizer {
     }
 }
 
-pub struct AgentDispatcher<'a> {
-    pub config: &'a Config,
+#[derive(Clone)]
+pub struct AgentDispatcher {
+    pub config: std::sync::Arc<Config>,
 }
 
-impl Dispatcher for AgentDispatcher<'_> {
+impl Dispatcher for AgentDispatcher {
     fn launch(&self, event: &TriggerEvent, instruction: &str) -> Result<String, String> {
         let entry = self
             .config
@@ -658,6 +878,19 @@ impl Dispatcher for AgentDispatcher<'_> {
             .as_ref()
             .map(|s| s.attempts.saturating_add(1))
             .unwrap_or(1);
+        let exec = Some(
+            crate::execution::create_execution(
+                &issue_key,
+                &event.repo,
+                event.number as i64,
+                attempt,
+                Some(&format!("github:{}", event.author)),
+                Some("local"),
+                Some(&format!("mention:{}:{}", event.kind.label(), event.id)),
+            )
+            .map_err(|e| format!("failed to register execution: {e}"))?,
+        );
+        let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
         let issue = serde_json::json!({
             "number": event.number,
             "title": event.title,
@@ -665,27 +898,51 @@ impl Dispatcher for AgentDispatcher<'_> {
             "labels": [],
         });
         let prompt = build_mention_prompt(event, instruction, &issue, prior.as_ref());
-        let thread = crate::agent::launch_agent(
-            &issue,
-            &project,
-            self.config,
-            Some(&prompt),
-            prior.as_ref().and_then(|s| s.thread_id.as_deref()),
+        let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+            issue: &issue,
+            project: &project,
+            config: &self.config,
+            prompt: Some(&prompt),
+            existing_thread: prior.as_ref().and_then(|s| s.thread_id.as_deref()),
             attempt,
-        )?;
-        let pr_url = prior
-            .as_ref()
-            .and_then(|s| s.pr_url.clone())
-            .or_else(|| discover_pr_url(&event.repo, event.number));
-        let _ = crate::state::update_issue_state(&issue_key, |rec| {
-            rec.status = crate::state::IssueStatus::Completed;
-            rec.thread_id = Some(thread.clone());
-            rec.last_error = None;
-            if pr_url.is_some() {
-                rec.pr_url = pr_url;
-            }
+            execution_id: exec_id,
         });
-        Ok(thread)
+        match launch {
+            Ok(thread) => {
+                let pr_url = prior
+                    .as_ref()
+                    .and_then(|s| s.pr_url.clone())
+                    .or_else(|| discover_pr_url(&event.repo, event.number));
+                if let Some(id) = exec_id {
+                    let _ =
+                        crate::execution::complete_execution(id, Some(&thread), pr_url.as_deref());
+                }
+                let _ = crate::state::update_issue_state(&issue_key, |rec| {
+                    rec.status = crate::state::IssueStatus::Completed;
+                    rec.thread_id = Some(thread.clone());
+                    rec.last_error = None;
+                    if pr_url.is_some() {
+                        rec.pr_url = pr_url;
+                    }
+                });
+                Ok(thread)
+            }
+            Err(e) => {
+                if let Some(id) = exec_id {
+                    if crate::execution::is_cancel_requested(id) {
+                        let _ =
+                            crate::execution::mark_cancel_confirmed(id, "cancelled_during_launch");
+                    } else {
+                        let _ = crate::execution::fail_execution(id, &e);
+                    }
+                }
+                let _ = crate::state::update_issue_state(&issue_key, |rec| {
+                    rec.status = crate::state::IssueStatus::Failed;
+                    rec.last_error = Some(e.clone());
+                });
+                Err(e)
+            }
+        }
     }
 
     fn report(&self, event: &TriggerEvent, status: &str) {
@@ -1361,5 +1618,116 @@ mod tests {
         assert_eq!(ev.kind, EventKind::Comment);
         assert_eq!(ev.number, 7);
         assert!(ev.author_is_bot);
+    }
+
+    #[test]
+    fn parse_cancel_mention_with_execution_id() {
+        let inv = parse_cancel_invocation("@alice cancel exec_123", &mentions()).unwrap();
+        assert_eq!(inv.username, "alice");
+        assert_eq!(inv.execution_id.as_deref(), Some("exec_123"));
+    }
+
+    #[test]
+    fn parse_cancel_mention_without_execution_id() {
+        let inv = parse_cancel_invocation("@alice factory cancel", &mentions()).unwrap();
+        assert_eq!(inv.execution_id, None);
+    }
+
+    #[test]
+    fn cancel_mention_rejects_unauthorized_author() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!(
+            "factory_cancel_auth_{}.db",
+            uuid::Uuid::now_v7().simple()
+        ));
+        let _ = std::fs::remove_file(&tmp);
+        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        let rec = crate::execution::create_execution(
+            "org/factory#5",
+            "org/factory",
+            5,
+            1,
+            Some("github:alice"),
+            Some("local"),
+            None,
+        )
+        .unwrap();
+
+        let config = config_with(mentions());
+        let store = MemStore::default();
+        let dispatcher = FakeDispatcher::default();
+        let engine = Engine::new(&config, &store, &dispatcher, &DenyAll);
+        let mut ev = event(
+            "c1",
+            &format!("@alice cancel {}", rec.execution_id),
+            "2024-01-01T00:00:00Z",
+        );
+        ev.author = "mallory".to_string();
+        let out = engine.handle(&ev, 100);
+        assert!(matches!(out, Outcome::Rejected(_)));
+        std::fs::remove_file(&tmp).ok();
+        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+    }
+
+    #[test]
+    fn cancel_mention_rejects_ambiguous_context() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!(
+            "factory_cancel_amb_{}.db",
+            uuid::Uuid::now_v7().simple()
+        ));
+        let _ = std::fs::remove_file(&tmp);
+        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        let a = crate::execution::create_execution(
+            "org/factory#5",
+            "org/factory",
+            5,
+            1,
+            Some("github:alice"),
+            Some("local"),
+            None,
+        )
+        .unwrap();
+        let b = crate::execution::create_execution(
+            "org/factory#5",
+            "org/factory",
+            5,
+            2,
+            Some("github:alice"),
+            Some("local"),
+            None,
+        )
+        .unwrap();
+        let _ = crate::execution::transition_execution(
+            &a.execution_id,
+            Some(crate::execution::ExecutionStatus::Queued),
+            crate::execution::ExecutionStatus::Running,
+            None,
+            None,
+        );
+        let _ = crate::execution::transition_execution(
+            &b.execution_id,
+            Some(crate::execution::ExecutionStatus::Queued),
+            crate::execution::ExecutionStatus::Running,
+            None,
+            None,
+        );
+
+        let config = config_with(mentions());
+        let store = MemStore::default();
+        let dispatcher = FakeDispatcher::default();
+        let engine = Engine::new(&config, &store, &dispatcher, &AllowAll);
+        let ev = event("c2", "@alice factory cancel", "2024-01-01T00:00:00Z");
+        let out = engine.handle(&ev, 100);
+        match out {
+            Outcome::Rejected(msg) => assert!(msg.contains("ambiguous")),
+            other => panic!("expected rejected, got {other:?}"),
+        }
+        std::fs::remove_file(&tmp).ok();
+        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
     }
 }

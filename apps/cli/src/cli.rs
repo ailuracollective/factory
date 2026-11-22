@@ -267,7 +267,10 @@ pub fn listen(port: Option<u16>) -> Result<()> {
 }
 
 pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
-    use crate::mentions::{AgentDispatcher, Engine, GhAuthorizer, GhEventSource, SqliteEventStore};
+    use crate::mentions::{
+        parse_cancel_invocation, parse_invocation, AgentDispatcher, Engine, EventSource,
+        EventStore, GhAuthorizer, GhEventSource, SqliteEventStore,
+    };
 
     let config = load_config()?;
     if !config.mentions.enabled {
@@ -280,26 +283,71 @@ pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
     }
     let store = SqliteEventStore;
     let mut source = GhEventSource;
+    let mut bg: Vec<std::thread::JoinHandle<()>> = Vec::new();
     loop {
-        // Reload config each poll so username/policy changes apply without a restart.
-        let config = load_config()?;
+        bg.retain(|h| !h.is_finished());
+        let config = std::sync::Arc::new(load_config()?);
         let interval = interval
             .unwrap_or(config.mentions.poll_interval_secs)
             .max(5);
-        let dispatcher = AgentDispatcher { config: &config };
+        let lookback = config.mentions.initial_lookback_secs;
+        let dispatcher = AgentDispatcher {
+            config: config.clone(),
+        };
         let authorizer = GhAuthorizer;
-        let engine = Engine::new(&config, &store, &dispatcher, &authorizer);
-        match engine.poll(&mut source, crate::state::now()) {
-            Ok(summary) => tracing::info!(
-                ignored = summary.ignored,
-                rejected = summary.rejected,
-                launched = summary.launched,
-                failed = summary.failed,
-                "mention poll complete"
-            ),
-            Err(e) => tracing::error!("mention poll failed: {e}"),
+
+        for repo in config.repos.iter().filter(|r| r.enabled) {
+            if repo.github.trim().is_empty() {
+                continue;
+            }
+            let cursor = store.cursor(&repo.github);
+            let since = cursor.clone().unwrap_or_else(|| {
+                crate::mentions::format_timestamp(crate::state::now().saturating_sub(lookback))
+            });
+            let events = match source.fetch(&repo.github, Some(&since)) {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::error!(repo = %repo.github, "mention poll failed: {e}");
+                    continue;
+                }
+            };
+            let mut max_ts = crate::mentions::parse_timestamp(&since).unwrap_or(0);
+            for event in &events {
+                if let Some(ts) = crate::mentions::parse_timestamp(&event.updated_at) {
+                    max_ts = max_ts.max(ts);
+                }
+                let is_cancel = parse_cancel_invocation(&event.body, &config.mentions).is_some();
+                let is_launch =
+                    !is_cancel && parse_invocation(&event.body, &config.mentions).is_some();
+                if is_launch && !event.author_is_bot {
+                    let event = event.clone();
+                    let cfg = config.clone();
+                    let disp = dispatcher.clone();
+                    let auth = authorizer;
+                    let st = store;
+                    bg.push(std::thread::spawn(move || {
+                        let engine = Engine::new(&cfg, &st, &disp, &auth);
+                        let _ = engine.handle(&event, crate::state::now());
+                    }));
+                } else {
+                    let engine = Engine::new(&config, &store, &dispatcher, &authorizer);
+                    let _ = engine.handle(event, crate::state::now());
+                }
+            }
+            let cursor_ts = cursor
+                .as_deref()
+                .and_then(crate::mentions::parse_timestamp)
+                .unwrap_or(0);
+            if max_ts > 0 && max_ts > cursor_ts {
+                let next = crate::mentions::format_timestamp(max_ts.saturating_sub(5));
+                let _ = store.set_cursor(&repo.github, &next);
+            }
         }
+
         if once {
+            for h in bg {
+                let _ = h.join();
+            }
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_secs(interval));
@@ -428,26 +476,51 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
         .as_ref()
         .map(|s| s.attempts.saturating_add(1))
         .unwrap_or(1);
-    match crate::agent::launch_agent(
-        &issue_data,
-        &project,
-        &config,
-        prompt.as_deref(),
-        existing.as_deref(),
+    let exec = Some(crate::execution::create_execution(
+        &key,
+        &repo_entry.github,
+        issue as i64,
         attempt,
-    ) {
+        Some("cli"),
+        Some("local"),
+        Some("manual test"),
+    )?);
+    let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
+    let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+        issue: &issue_data,
+        project: &project,
+        config: &config,
+        prompt: prompt.as_deref(),
+        existing_thread: existing.as_deref(),
+        attempt,
+        execution_id: exec_id,
+    });
+    match launch {
         Ok(tid) => {
+            let pr_url = crate::mentions::discover_pr_url(&repo_entry.github, issue);
+            if let Some(id) = exec_id {
+                let _ = crate::execution::complete_execution(id, Some(&tid), pr_url.as_deref());
+            }
             let _ = crate::state::update_issue_state(&key, |rec| {
                 rec.status = crate::state::IssueStatus::Completed;
                 rec.thread_id = Some(tid.clone());
                 rec.last_error = None;
                 if rec.pr_url.is_none() {
-                    rec.pr_url = crate::mentions::discover_pr_url(&repo_entry.github, issue);
+                    rec.pr_url = pr_url;
                 }
             });
+            if let Some(e) = exec {
+                println!("Execution: {}", e.execution_id);
+            }
             println!("Launched thread: {}", tid);
         }
         Err(e) => {
+            if let Some(id) = exec_id {
+                let cancelled = crate::execution::is_cancel_requested(id);
+                if !cancelled {
+                    let _ = crate::execution::fail_execution(id, &e);
+                }
+            }
             let _ = crate::state::update_issue_state(&key, |rec| {
                 rec.status = crate::state::IssueStatus::Failed;
                 rec.last_error = Some(e.clone());
@@ -474,11 +547,159 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
     }
     // build a minimal issue-like object
     let issue = serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
-    match crate::agent::launch_agent(&issue, &project, &config, Some(prompt), None, 1) {
-        Ok(tid) => println!("Launched thread: {}", tid),
-        Err(e) => println!("Failed to launch agent: {e}"),
+    let key = format!("{}#0", repo_entry.github);
+    let exec = Some(crate::execution::create_execution(
+        &key,
+        &repo_entry.github,
+        0,
+        1,
+        Some("cli"),
+        Some("local"),
+        Some("custom prompt"),
+    )?);
+    let exec_id = exec.as_ref().map(|e| e.execution_id.as_str());
+    let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+        issue: &issue,
+        project: &project,
+        config: &config,
+        prompt: Some(prompt),
+        existing_thread: None,
+        attempt: 1,
+        execution_id: exec_id,
+    });
+    match launch {
+        Ok(tid) => {
+            if let Some(id) = exec_id {
+                let _ = crate::execution::complete_execution(id, Some(&tid), None);
+            }
+            if let Some(e) = exec {
+                println!("Execution: {}", e.execution_id);
+            }
+            println!("Launched thread: {}", tid);
+        }
+        Err(e) => {
+            if let Some(id) = exec_id {
+                if !crate::execution::is_cancel_requested(id) {
+                    let _ = crate::execution::fail_execution(id, &e);
+                }
+            }
+            println!("Failed to launch agent: {e}");
+        }
     }
     Ok(())
+}
+
+pub fn cancel(
+    execution_id: Option<&str>,
+    repo: Option<&str>,
+    issue: Option<u64>,
+    pr: Option<u64>,
+    force: bool,
+) -> Result<()> {
+    let actor = std::env::var("USER").unwrap_or_else(|_| "cli".to_string());
+    let target = resolve_cancel_target(execution_id, repo, issue, pr)?;
+    let rec = crate::execution::request_cancel(
+        &target,
+        &format!("cli:{actor}"),
+        force,
+        Some("cli cancel"),
+    )?;
+    let _ = crate::agent::cancel_running_execution(&target, force);
+    let _ = crate::execution::append_audit(crate::execution::ExecutionAuditEvent {
+        ts: crate::state::now(),
+        actor: format!("cli:{actor}"),
+        action: if force {
+            "cancel_force".to_string()
+        } else {
+            "cancel".to_string()
+        },
+        target: target.clone(),
+        outcome: rec.status.as_str().to_string(),
+        detail: Some(rec.message.clone()),
+    });
+    println!("Execution: {}", rec.execution_id);
+    println!("Status: {}", rec.status.as_str());
+    println!("Requested: {}", rec.requested);
+    println!("Confirmed: {}", rec.confirmed);
+    println!("{}", rec.message);
+    if rec.status == crate::execution::ExecutionStatus::Cancelling && !rec.confirmed {
+        println!("Cancellation is not yet confirmed; the execution may still be stopping.");
+    }
+    Ok(())
+}
+
+fn resolve_cancel_target(
+    execution_id: Option<&str>,
+    repo: Option<&str>,
+    issue: Option<u64>,
+    pr: Option<u64>,
+) -> Result<String> {
+    if let Some(id) = execution_id.map(str::trim).filter(|s| !s.is_empty()) {
+        let rec = crate::execution::get_execution(id)?
+            .ok_or_else(|| anyhow::anyhow!("execution not found: {id}"))?;
+        if let Some(repo) = repo {
+            if !rec.repo.eq_ignore_ascii_case(repo) {
+                anyhow::bail!("execution {id} does not belong to repo {repo}");
+            }
+        }
+        if let Some(issue) = issue {
+            if rec.issue_number != issue as i64 {
+                anyhow::bail!("execution {id} does not match issue #{issue}");
+            }
+        }
+        if let Some(pr) = pr {
+            let pr_match = rec
+                .pr_url
+                .as_deref()
+                .map(|u| u.contains(&format!("/pull/{pr}")))
+                .unwrap_or(false)
+                || rec.issue_number == pr as i64;
+            if !pr_match {
+                anyhow::bail!("execution {id} does not match pr #{pr}");
+            }
+        }
+        return Ok(rec.execution_id);
+    }
+
+    let repo =
+        repo.ok_or_else(|| anyhow::anyhow!("provide <execution-id> or --repo with --issue/--pr"))?;
+    let candidates = if let Some(issue) = issue {
+        crate::execution::list_cancellable_for_issue(repo, issue as i64)?
+    } else if let Some(pr) = pr {
+        crate::execution::list_cancellable_for_repo(repo)?
+            .into_iter()
+            .filter(|r| {
+                r.pr_url
+                    .as_deref()
+                    .map(|u| u.contains(&format!("/pull/{pr}")))
+                    .unwrap_or(false)
+                    || r.issue_number == pr as i64
+            })
+            .collect()
+    } else {
+        anyhow::bail!("provide --issue or --pr with --repo");
+    };
+
+    match candidates.len() {
+        0 => anyhow::bail!("no cancellable execution found for the given context"),
+        1 => Ok(candidates[0].execution_id.clone()),
+        _ => {
+            let ids = candidates
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{} (issue #{}, {}, attempt {})",
+                        r.execution_id,
+                        r.issue_number,
+                        r.status.as_str(),
+                        r.attempt
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n  - ");
+            anyhow::bail!("ambiguous cancel context; specify execution id:\n  - {ids}");
+        }
+    }
 }
 
 pub fn connect(gateway: &str, runner: &str, bootstrap_secret: Option<&str>) -> Result<()> {
@@ -529,6 +750,7 @@ pub(crate) fn encode_path_segment(s: &str) -> String {
 }
 
 pub fn runner(once: bool) -> Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
     loop {
         let config = load_config()?;
         let gw = config.gateway.url.clone();
@@ -590,7 +812,6 @@ pub fn runner(once: bool) -> Result<()> {
                     .unwrap_or("")
                     .to_string();
 
-                // resolve project path
                 let repo_entry = config
                     .repos
                     .iter()
@@ -621,41 +842,137 @@ pub fn runner(once: bool) -> Result<()> {
                     .as_ref()
                     .map(|s| s.attempts.saturating_add(1))
                     .unwrap_or(1);
-                // heartbeat running
-                let _ = client
-                    .post(format!("{}/jobs/{}/heartbeat", gw, encode_path_segment(&job_id)))
-                    .json(&serde_json::json!({"runner_id": runner_id, "token": token, "status": "running"}))
-                    .send();
-
-                match crate::agent::launch_agent(
-                    &issue,
-                    &project,
-                    &config,
-                    None,
-                    existing.as_deref(),
+                let exec = Some(crate::execution::create_execution(
+                    &key,
+                    &repo,
+                    number,
                     attempt,
-                ) {
-                    Ok(tid) => {
-                        let _ = crate::state::update_issue_state(&key, |rec| {
-                            rec.status = crate::state::IssueStatus::Completed;
-                            rec.thread_id = Some(tid.clone());
-                            rec.last_error = None;
-                            if rec.pr_url.is_none() {
-                                rec.pr_url = crate::mentions::discover_pr_url(&repo, number as u64);
-                            }
-                        });
-                        let _ = client
-                            .post(format!("{}/jobs/{}/complete", gw, encode_path_segment(&job_id)))
-                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "thread_id": tid}))
+                    Some(&format!("runner:{runner_id}")),
+                    Some(&runner_id),
+                    Some(&format!("gateway-job:{job_id}")),
+                )?);
+                let exec_id = exec.as_ref().map(|e| e.execution_id.clone());
+
+                let stop = std::sync::Arc::new(AtomicBool::new(false));
+                let stop_hb = stop.clone();
+                let gw_hb = gw.clone();
+                let runner_hb = runner_id.clone();
+                let token_hb = token.clone();
+                let job_hb = job_id.clone();
+                let exec_hb = exec_id.clone();
+                let hb = std::thread::spawn(move || {
+                    let client = reqwest::blocking::Client::new();
+                    while !stop_hb.load(Ordering::Relaxed) {
+                        let resp = client
+                            .post(format!("{}/jobs/{}/heartbeat", gw_hb, encode_path_segment(&job_hb)))
+                            .json(&serde_json::json!({"runner_id": runner_hb, "token": token_hb, "status": "running"}))
                             .send();
-                        println!("Completed job {} -> {}", job_id, tid);
+                        if let Ok(r) = resp {
+                            if let Ok(body) = r.json::<serde_json::Value>() {
+                                let job_status = body
+                                    .get("job_status")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                if job_status == "cancelled" || job_status == "cancelling" {
+                                    if let Some(ref id) = exec_hb {
+                                        let _ = crate::execution::request_cancel(
+                                            id,
+                                            "gateway",
+                                            false,
+                                            Some("gateway job cancelled"),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        for _ in 0..15 {
+                            if stop_hb.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                        }
+                    }
+                });
+
+                let launch =
+                    crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+                        issue: &issue,
+                        project: &project,
+                        config: &config,
+                        prompt: None,
+                        existing_thread: existing.as_deref(),
+                        attempt,
+                        execution_id: exec_id.as_deref(),
+                    });
+
+                stop.store(true, Ordering::Relaxed);
+                let _ = hb.join();
+
+                match launch {
+                    Ok(tid) => {
+                        let cancelled = exec_id
+                            .as_deref()
+                            .map(crate::execution::is_cancel_requested)
+                            .unwrap_or(false);
+                        if cancelled {
+                            if let Some(ref id) = exec_id {
+                                let _ =
+                                    crate::execution::mark_cancel_confirmed(id, "runner_cancelled");
+                            }
+                            let _ = client
+                                .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
+                                .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "cancelled"}))
+                                .send();
+                            println!("Cancelled job {}", job_id);
+                        } else {
+                            let pr_url = crate::mentions::discover_pr_url(&repo, number as u64);
+                            if let Some(ref id) = exec_id {
+                                let _ = crate::execution::complete_execution(
+                                    id,
+                                    Some(&tid),
+                                    pr_url.as_deref(),
+                                );
+                            }
+                            let _ = crate::state::update_issue_state(&key, |rec| {
+                                rec.status = crate::state::IssueStatus::Completed;
+                                rec.thread_id = Some(tid.clone());
+                                rec.last_error = None;
+                                if rec.pr_url.is_none() {
+                                    rec.pr_url = pr_url;
+                                }
+                            });
+                            let _ = client
+                                .post(format!("{}/jobs/{}/complete", gw, encode_path_segment(&job_id)))
+                                .json(&serde_json::json!({"runner_id": runner_id, "token": token, "thread_id": tid}))
+                                .send();
+                            println!("Completed job {} -> {}", job_id, tid);
+                        }
                     }
                     Err(e) => {
-                        let _ = client
-                            .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
-                            .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": e}))
-                            .send();
-                        println!("Failed job {}: {}", job_id, e);
+                        let cancelled = exec_id
+                            .as_deref()
+                            .map(crate::execution::is_cancel_requested)
+                            .unwrap_or_else(|| e.to_lowercase().contains("cancel"));
+                        if cancelled {
+                            if let Some(ref id) = exec_id {
+                                let _ =
+                                    crate::execution::mark_cancel_confirmed(id, "runner_cancelled");
+                            }
+                            let _ = client
+                                .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
+                                .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "cancelled"}))
+                                .send();
+                            println!("Cancelled job {}", job_id);
+                        } else {
+                            if let Some(ref id) = exec_id {
+                                let _ = crate::execution::fail_execution(id, &e);
+                            }
+                            let _ = client
+                                .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
+                                .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": e}))
+                                .send();
+                            println!("Failed job {}: {}", job_id, e);
+                        }
                     }
                 }
 
