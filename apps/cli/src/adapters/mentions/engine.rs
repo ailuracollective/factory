@@ -93,7 +93,7 @@ impl<'a> Engine<'a> {
                     .store
                     .record(&key, "completed", &format!("op=fix thread={thread}"));
                 self.dispatcher
-                    .report(event, &format!("completed; agent thread `{thread}`"));
+                    .report(event, "completed");
                 Outcome::Launched(thread)
             }
             Err(e) => {
