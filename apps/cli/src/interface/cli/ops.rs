@@ -269,11 +269,32 @@ fn resolve_cancel_target(
 }
 
 pub fn connect(gateway: &str, runner: &str, bootstrap_secret: Option<&str>) -> Result<()> {
+    let mut config = load_config()?;
+    if config.gateway.callback_secret.trim().is_empty() {
+        config.gateway.callback_secret = generate_secret();
+    }
+    let callback_url = if config.gateway.callback_url.trim().is_empty() {
+        let base = config.webhook.funnel_url.trim_end_matches('/').to_string();
+        if base.is_empty() {
+            String::new()
+        } else {
+            format!("{}/runner/jobs", base)
+        }
+    } else {
+        config.gateway.callback_url.clone()
+    };
+    if !callback_url.is_empty() {
+        config.gateway.callback_url = callback_url.clone();
+    }
+    save_config(&config)?;
+
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/runners/register", gateway.trim_end_matches('/'));
-    let mut req = client
-        .post(&url)
-        .json(&serde_json::json!({"runner_id": runner}));
+    let mut req = client.post(&url).json(&serde_json::json!({
+        "runner_id": runner,
+        "callback_url": callback_url,
+        "callback_secret": config.gateway.callback_secret,
+    }));
     if let Some(s) = bootstrap_secret {
         req = req.header("x-bootstrap-secret", s);
     }

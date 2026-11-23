@@ -27,10 +27,7 @@ enum Commands {
         action: RepoAction,
     },
     /// Start the daemon
-    Start {
-        #[arg(long)]
-        foreground: bool,
-    },
+    Start,
     /// Stop the daemon
     Stop,
     /// Restart the daemon
@@ -55,13 +52,6 @@ enum Commands {
     Listen {
         #[arg(long)]
         port: Option<u16>,
-    },
-    /// Poll GitHub for configured mentions and dispatch authorized work
-    Mentions {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        interval: Option<u64>,
     },
     /// Register this runner with a gateway
     Connect {
@@ -141,7 +131,7 @@ fn main() -> ExitCode {
             RepoAction::Sync { name } => cli::repo_sync(&name),
             RepoAction::Check { name } => cli::repo_check(name.as_deref()),
         },
-        Commands::Start { foreground } => cli::start(foreground),
+        Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),
         Commands::Restart => cli::restart(),
         Commands::Status => cli::status(),
@@ -151,13 +141,15 @@ fn main() -> ExitCode {
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor => cli::doctor(),
         Commands::Listen { port } => cli::listen(port),
-        Commands::Mentions { once, interval } => cli::mentions(once, interval),
         Commands::Connect {
             gateway,
             runner,
             bootstrap_secret,
         } => cli::connect(&gateway, &runner, bootstrap_secret.as_deref()),
-        Commands::Runner { once } => cli::runner(once),
+        Commands::Runner { once } => {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(cli::runner(once))
+        }
         Commands::Test {
             repo,
             issue,

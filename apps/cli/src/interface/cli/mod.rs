@@ -207,20 +207,13 @@ pub fn repo_check(name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn start(foreground: bool) -> Result<()> {
+pub fn start() -> Result<()> {
     let (code, _) = run(&["systemctl", "--user", "start", "factory"]);
     if code == 0 {
         println!("Factory started.");
         return Ok(());
     }
-    println!("systemd not available.");
-    if foreground {
-        // run listener in foreground
-        let config = load_config()?;
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(crate::listener::serve(config))?;
-        return Ok(());
-    }
+    println!("systemd not available. Run 'factory listen' to start the listener in the foreground.");
     Ok(())
 }
 
@@ -265,94 +258,6 @@ pub fn listen(port: Option<u16>) -> Result<()> {
     }
     let rt = Runtime::new().unwrap();
     rt.block_on(crate::listener::serve(config))
-}
-
-pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
-    use crate::mentions::{
-        AgentDispatcher, Engine, EventSource, EventStore, GhAuthorizer, GhEventSource,
-        SqliteEventStore, parse_cancel_invocation, parse_invocation,
-    };
-
-    let config = load_config()?;
-    if !config.mentions.enabled {
-        println!("Mentions are disabled. Set mentions.enabled=true in the config.");
-        return Ok(());
-    }
-    if config.mentions.usernames.is_empty() {
-        println!("No trigger usernames configured. Set mentions.usernames in the config.");
-        return Ok(());
-    }
-    let store = SqliteEventStore;
-    let mut source = GhEventSource;
-    let mut bg: Vec<std::thread::JoinHandle<()>> = Vec::new();
-    loop {
-        bg.retain(|h| !h.is_finished());
-        let config = std::sync::Arc::new(load_config()?);
-        let interval = interval
-            .unwrap_or(config.mentions.poll_interval_secs)
-            .max(5);
-        let lookback = config.mentions.initial_lookback_secs;
-        let dispatcher = AgentDispatcher {
-            config: config.clone(),
-        };
-        let authorizer = GhAuthorizer;
-
-        for repo in config.repos.iter().filter(|r| r.enabled) {
-            if repo.github.trim().is_empty() {
-                continue;
-            }
-            let cursor = store.cursor(&repo.github);
-            let since = cursor.clone().unwrap_or_else(|| {
-                crate::mentions::format_timestamp(crate::state::now().saturating_sub(lookback))
-            });
-            let events = match source.fetch(&repo.github, Some(&since)) {
-                Ok(events) => events,
-                Err(e) => {
-                    tracing::error!(repo = %repo.github, "mention poll failed: {e}");
-                    continue;
-                }
-            };
-            let mut max_ts = crate::mentions::parse_timestamp(&since).unwrap_or(0);
-            for event in &events {
-                if let Some(ts) = crate::mentions::parse_timestamp(&event.updated_at) {
-                    max_ts = max_ts.max(ts);
-                }
-                let is_cancel = parse_cancel_invocation(&event.body, &config.mentions).is_some();
-                let is_launch =
-                    !is_cancel && parse_invocation(&event.body, &config.mentions).is_some();
-                if is_launch && !event.author_is_bot {
-                    let event = event.clone();
-                    let cfg = config.clone();
-                    let disp = dispatcher.clone();
-                    let auth = authorizer;
-                    let st = store;
-                    bg.push(std::thread::spawn(move || {
-                        let engine = Engine::new(&cfg, &st, &disp, &auth);
-                        let _ = engine.handle(&event, crate::state::now());
-                    }));
-                } else {
-                    let engine = Engine::new(&config, &store, &dispatcher, &authorizer);
-                    let _ = engine.handle(event, crate::state::now());
-                }
-            }
-            let cursor_ts = cursor
-                .as_deref()
-                .and_then(crate::mentions::parse_timestamp)
-                .unwrap_or(0);
-            if max_ts > 0 && max_ts > cursor_ts {
-                let next = crate::mentions::format_timestamp(max_ts.saturating_sub(5));
-                let _ = store.set_cursor(&repo.github, &next);
-            }
-        }
-
-        if once {
-            for h in bg {
-                let _ = h.join();
-            }
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_secs(interval));
-    }
 }
 
 pub fn status() -> Result<()> {
@@ -436,7 +341,7 @@ pub fn doctor() -> Result<()> {
 }
 
 mod ops;
-mod runner_cmd;
+pub mod runner_cmd;
 
 pub(crate) use ops::encode_path_segment;
 pub use ops::{cancel, connect, run_prompt, test};

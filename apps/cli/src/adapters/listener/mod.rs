@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
 use crate::config::Config;
+use crate::interface::cli::runner_cmd;
 use crate::state::{IssueState, IssueStatus, load_state, save_state};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -58,6 +59,7 @@ pub async fn serve(config: Config) -> Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/", post(webhook))
+        .route("/runner/jobs", post(runner_job))
         .with_state(state.clone());
 
     let ip: std::net::IpAddr = bind
@@ -146,6 +148,42 @@ async fn webhook(
         tracing::info!("webhook result: {}", status);
     });
 
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"status": "accepted"})),
+    )
+}
+
+async fn runner_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let secret = &state.config.gateway.callback_secret;
+    let provided = headers
+        .get("x-factory-dispatch-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if secret.is_empty() || provided != secret {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "bad secret"})),
+        );
+    }
+    let job: Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid json"})),
+            );
+        }
+    };
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        let config = state_clone.config.clone();
+        let _ = runner_cmd::process_job(config, job).await;
+    });
     (
         StatusCode::ACCEPTED,
         Json(serde_json::json!({"status": "accepted"})),
