@@ -86,6 +86,24 @@ impl ExecutionStatus {
     pub fn is_cancellable(self) -> bool {
         matches!(self, Self::Queued | Self::Running | Self::Cancelling)
     }
+
+    /// Guard centralizado de transiciones de la FSM de ejecución.
+    /// Fuente única de verdad; los consumidores deben consultarlo antes de mutar.
+    pub fn can_transition_to(self, to: Self) -> bool {
+        use ExecutionStatus::*;
+        matches!(
+            (self, to),
+            (Queued, Running)
+                | (Queued, Cancelled)
+                | (Queued, Failed)
+                | (Running, Cancelling)
+                | (Running, Completed)
+                | (Running, Failed)
+                | (Running, Cancelled)
+                | (Cancelling, Cancelled)
+                | (Cancelling, Failed)
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

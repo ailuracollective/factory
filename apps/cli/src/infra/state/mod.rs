@@ -98,6 +98,18 @@ pub enum IssueStatus {
 }
 
 impl IssueStatus {
+    /// Guard centralizado de transiciones de la FSM de issues.
+    pub fn can_transition_to(self, to: Self) -> bool {
+        use IssueStatus::*;
+        matches!(
+            (self, to),
+            (Pending, Running)
+                | (Running, Completed)
+                | (Running, Failed)
+                | (Failed, Pending)
+        )
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             IssueStatus::Pending => "pending",
