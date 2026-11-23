@@ -161,6 +161,7 @@ pub fn cancel(
     issue: Option<u64>,
     pr: Option<u64>,
     force: bool,
+    json: bool,
 ) -> Result<()> {
     let actor = std::env::var("USER").unwrap_or_else(|_| "factory".to_string());
     let target = resolve_cancel_target(execution_id, repo, issue, pr)?;
@@ -183,13 +184,33 @@ pub fn cancel(
         outcome: rec.status.as_str().to_string(),
         detail: Some(rec.message.clone()),
     });
-    println!("Execution: {}", rec.execution_id);
-    println!("Status: {}", rec.status.as_str());
-    println!("Requested: {}", rec.requested);
-    println!("Confirmed: {}", rec.confirmed);
-    println!("{}", rec.message);
-    if rec.status == crate::execution::ExecutionStatus::Cancelling && !rec.confirmed {
-        println!("Cancellation is not yet confirmed; the execution may still be stopping.");
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct CancelResult {
+            execution_id: String,
+            status: String,
+            requested: bool,
+            confirmed: bool,
+            message: String,
+        }
+        let data = CancelResult {
+            execution_id: rec.execution_id.clone(),
+            status: rec.status.as_str().to_string(),
+            requested: rec.requested,
+            confirmed: rec.confirmed,
+            message: rec.message.clone(),
+        };
+        println!("{}", to_json(&OutputEnvelope::new(data)).unwrap());
+    } else {
+        println!("Execution: {}", rec.execution_id);
+        println!("Status: {}", rec.status.as_str());
+        println!("Requested: {}", rec.requested);
+        println!("Confirmed: {}", rec.confirmed);
+        println!("{}", rec.message);
+        if rec.status == crate::execution::ExecutionStatus::Cancelling && !rec.confirmed {
+            println!("Cancellation is not yet confirmed; the execution may still be stopping.");
+        }
     }
     Ok(())
 }
