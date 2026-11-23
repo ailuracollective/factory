@@ -13,10 +13,9 @@ Local daemon + manual commands. Three modes:
 
 - Local mode (existing): webhooks direct to machine, T3 agent launch.
 - Mentions: `factory listen` handles mention webhooks in real time
-  (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`);
-  `factory mentions` provides polling fallback. Parsing, authorization, dedup and
-  dispatch live in `apps/cli/src/mentions.rs` behind `EventSource`/`Engine`, so a
-  Gateway-backed source can replace polling without changing core logic.
+  (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`).
+  Parsing, authorization, dedup and dispatch live in `apps/cli/src/mentions.rs`
+  behind `Engine`, reused by GitHub webhooks and runner job pushes.
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.
 
 ### Factory Gateway (`apps/gateway`)
@@ -33,7 +32,7 @@ No Tokio/SQLx. Use `worker` crate, D1 bindings, async/await. Axum may be used vi
 
 ## Data flow (MVP)
 
-GitHub -> Gateway webhook -> authorize -> persist job (D1) -> CLI polls/claims job -> runs agent -> reports result -> Gateway updates GitHub (comment/PR) with minimal permissions.
+GitHub -> Gateway webhook -> authorize -> persist job (D1) -> Gateway pushes job to runner webhook -> runs agent -> reports result -> Gateway updates GitHub (comment/PR) with minimal permissions.
 
 ## Security
 
