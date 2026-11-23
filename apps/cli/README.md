@@ -33,8 +33,8 @@ Run `factory --help` for the full command list. Common commands:
 - `factory daemon run --mode listener` — run webhook listener (processes GitHub events and runner jobs)
 - `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
 - `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
-- `factory harnesses [--json]` — list harnesses installed in T3 Code
-- `factory models <harness> [--json]` — list models of a harness
+- `factory agent harnesses [--json]` (also `factory harnesses`) — list harnesses installed in T3 Code
+- `factory agent models <harness> [--json]` (also `factory models`) — list models of a harness
 
 ## Configuration
 
@@ -57,10 +57,10 @@ Values come from T3 Code's own catalog (`<T3CODE_HOME>/caches`, default
 `~/.t3/caches`), not from `opencode models`, so no harness or model names are
 hardcoded in the CLI:
 
-- `factory harnesses` lists the harnesses T3 reports as installed, marking the
+- `factory agent harnesses` lists the harnesses T3 reports as installed, marking the
   configured one.
-- `factory models <harness>` lists the models that harness exposes, e.g.
-  `factory models opencode`.
+- `factory agent models <harness>` lists the models that harness exposes, e.g.
+  `factory agent models opencode`.
 - An unknown harness prints the harnesses T3 reports as installed.
 
 `factory config set` validates `harness` against installed harnesses and

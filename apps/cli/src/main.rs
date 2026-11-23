@@ -38,12 +38,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// List harnesses installed in T3 Code
+    /// List harnesses installed in T3 Code (deprecated: use `agent harnesses`)
+    #[command(hide = true)]
     Harnesses {
         #[arg(long)]
         json: bool,
     },
-    /// List models of a harness
+    /// List models of a harness (deprecated: use `agent models`)
+    #[command(hide = true)]
     Models {
         harness: String,
         #[arg(long)]
@@ -130,6 +132,17 @@ enum AgentAction {
         harness: Option<String>,
         #[arg(long)]
         model: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List harnesses installed in T3 Code
+    Harnesses {
+        #[arg(long)]
+        json: bool,
+    },
+    /// List models of a harness
+    Models {
+        harness: String,
         #[arg(long)]
         json: bool,
     },
@@ -339,6 +352,8 @@ fn main() -> ExitCode {
                 model.as_deref(),
                 json,
             ),
+            AgentAction::Harnesses { json } => cli::harnesses(json),
+            AgentAction::Models { harness, json } => cli::models(&harness, json),
         },
         Commands::Cancel {
             execution_id,
