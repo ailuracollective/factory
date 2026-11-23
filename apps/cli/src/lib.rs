@@ -1,10 +1,10 @@
-pub mod agent;
-pub mod cli;
-pub mod config;
-pub mod doctor;
-pub mod execution;
-pub mod listener;
-pub mod mentions;
-pub mod repo_manager;
-pub mod state;
-pub mod webhook_manager;
+pub mod adapters;
+pub mod application;
+pub mod infra;
+pub mod interface;
+
+// Backward-compatible flat paths.
+pub use adapters::{listener, mentions, webhook_manager};
+pub use application::{agent, execution, repo_manager};
+pub use infra::{config, state};
+pub use interface::{cli, doctor};
