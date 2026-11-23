@@ -505,6 +505,33 @@ pub fn config_set(key: &str, value: &str) -> Result<()> {
             }
             cfg.defaults.model = value.to_string();
         }
+        "base_branch" => cfg.defaults.base_branch = value.to_string(),
+        "label" => cfg.defaults.label = value.to_string(),
+        "max_attempts" => {
+            if let Ok(n) = value.parse() {
+                cfg.defaults.max_attempts = n;
+            } else {
+                println!("Invalid number: {}", value);
+                return Ok(());
+            }
+        }
+        "mentions.enabled" => cfg.mentions.enabled = value == "true" || value == "1",
+        "mentions.command" => cfg.mentions.command = value.to_string(),
+        "mentions.allowed_authors" => {
+            cfg.mentions.allowed_authors = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+        }
+        "mentions.daily_quota" => {
+            if let Ok(n) = value.parse() {
+                cfg.mentions.daily_quota = n;
+            } else {
+                println!("Invalid number: {}", value);
+                return Ok(());
+            }
+        }
+        "mentions.report" => cfg.mentions.report = value == "true" || value == "1",
+        "mentions.usernames_extra" => {
+            cfg.mentions.usernames_extra = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+        }
         "mentions.usernames" => {
             cfg.mentions.usernames = value
                 .split(',')
@@ -514,7 +541,7 @@ pub fn config_set(key: &str, value: &str) -> Result<()> {
                 .collect();
         }
         _ => {
-            println!("Unknown key: {}. Use 'provider', 'model' or 'mentions.usernames'.", key);
+            println!("Unknown key: {}. Use 'provider', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.", key);
             return Ok(());
         }
     }
