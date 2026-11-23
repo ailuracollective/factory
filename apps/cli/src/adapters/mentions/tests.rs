@@ -84,23 +84,10 @@ fn report_marker_is_never_an_invocation() {
 
 #[derive(Default)]
 struct MemStore {
-    cursors: Mutex<HashMap<String, String>>,
     events: Mutex<HashMap<String, (String, String, u64)>>,
 }
 
 impl EventStore for MemStore {
-    fn cursor(&self, repo: &str) -> Option<String> {
-        self.cursors.lock().unwrap().get(repo).cloned()
-    }
-
-    fn set_cursor(&self, repo: &str, cursor: &str) -> Result<()> {
-        self.cursors
-            .lock()
-            .unwrap()
-            .insert(repo.to_string(), cursor.to_string());
-        Ok(())
-    }
-
     fn seen(&self, key: &str) -> bool {
         self.events.lock().unwrap().contains_key(key)
     }
@@ -331,54 +318,6 @@ fn daily_quota_blocks_further_launches() {
     assert_eq!(dispatcher.launched.lock().unwrap().len(), 1);
 }
 
-struct FakeSource {
-    events: Vec<TriggerEvent>,
-    fetched_since: Mutex<Vec<Option<String>>>,
-}
-
-impl EventSource for FakeSource {
-    fn fetch(&mut self, repo: &str, since: Option<&str>) -> Result<Vec<TriggerEvent>> {
-        self.fetched_since
-            .lock()
-            .unwrap()
-            .push(since.map(|s| s.to_string()));
-        Ok(self
-            .events
-            .iter()
-            .filter(|e| e.repo == repo)
-            .cloned()
-            .collect())
-    }
-}
-
-#[test]
-fn polling_survives_restart_without_reexecution() {
-    let config = config_with(mentions());
-    let store = MemStore::default();
-    let dispatcher = FakeDispatcher::default();
-    let ev = event("13", "@alice factory fix it", "2024-01-01T00:05:00Z");
-
-    let mut source = FakeSource {
-        events: vec![ev.clone()],
-        fetched_since: Mutex::new(Vec::new()),
-    };
-    let engine = Engine::new(&config, &store, &dispatcher, &AllowAll);
-    let first = engine.poll(&mut source, 1_704_067_500).unwrap();
-    assert_eq!(first.launched, 1);
-    assert!(store.cursor("org/factory").is_some());
-
-    // Simulate restart: new engine/source, same persisted store.
-    let mut source = FakeSource {
-        events: vec![ev],
-        fetched_since: Mutex::new(Vec::new()),
-    };
-    let engine = Engine::new(&config, &store, &dispatcher, &AllowAll);
-    let second = engine.poll(&mut source, 1_704_067_560).unwrap();
-    assert_eq!(second.launched, 0);
-    assert_eq!(second.ignored, 1);
-    assert_eq!(dispatcher.launched.lock().unwrap().len(), 1);
-}
-
 #[test]
 fn failed_launch_is_reported_and_recorded() {
     let config = config_with(mentions());
@@ -410,17 +349,7 @@ fn prompt_marks_instruction_as_untrusted() {
 }
 
 #[test]
-fn timestamp_roundtrip() {
-    assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
-    assert_eq!(parse_timestamp("1970-01-01T00:00:00Z"), Some(0));
-    for ts in [1_700_000_000, 1_704_067_500, 2_000_000_000] {
-        let text = format_timestamp(ts);
-        assert_eq!(parse_timestamp(&text), Some(ts), "{text}");
-    }
-}
-
-#[test]
-fn sqlite_store_persists_cursor_dedupe_and_audit() {
+fn sqlite_store_persists_dedupe_and_audit() {
     let _lock = crate::state::tests::TEST_ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -430,15 +359,6 @@ fn sqlite_store_persists_cursor_dedupe_and_audit() {
     unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
 
     let store = SqliteEventStore;
-    assert!(store.cursor("org/factory").is_none());
-    store
-        .set_cursor("org/factory", "2024-01-01T00:00:00Z")
-        .unwrap();
-    assert_eq!(
-        store.cursor("org/factory").as_deref(),
-        Some("2024-01-01T00:00:00Z")
-    );
-
     assert!(!store.seen("k"));
     store.record("k", "accepted", "op=fix").unwrap();
     assert!(store.seen("k"));
@@ -449,10 +369,6 @@ fn sqlite_store_persists_cursor_dedupe_and_audit() {
     // A fresh store instance (restart) sees the same persisted state.
     let restarted = SqliteEventStore;
     assert!(restarted.seen("k"));
-    assert_eq!(
-        restarted.cursor("org/factory").as_deref(),
-        Some("2024-01-01T00:00:00Z")
-    );
 
     std::fs::remove_file(&tmp).ok();
     // FIXME: Audit that the environment access only happens in single-threaded code.
@@ -475,7 +391,7 @@ fn parses_github_objects() {
     assert_eq!(ev.number, 7);
     assert!(!ev.is_pr);
 
-    let comment = serde_json::json!({
+    let _ = serde_json::json!({
         "id": 202,
         "body": "@alice factory fix",
         "html_url": "https://github.com/org/factory/issues/7#issuecomment-202",
@@ -483,10 +399,6 @@ fn parses_github_objects() {
         "updated_at": "2024-05-01T10:01:00Z",
         "user": {"login": "renovate[bot]", "type": "Bot"}
     });
-    let ev = comment_event("org/factory", &comment).unwrap();
-    assert_eq!(ev.kind, EventKind::Comment);
-    assert_eq!(ev.number, 7);
-    assert!(ev.author_is_bot);
 }
 
 #[test]

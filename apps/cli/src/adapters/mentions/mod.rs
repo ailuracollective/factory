@@ -1,9 +1,7 @@
-//! Standalone (Gateway-free) mention ingestion.
+//! Mention ingestion for GitHub issue/PR comments and bodies.
 //!
-//! GitHub does not send notifications for self-mentions, so the CLI polls the
-//! allowlisted repositories itself and dispatches authorized requests through
-//! the existing agent launcher. A future Gateway-backed `EventSource` can reuse
-//! the same parser and engine.
+//! Events arrive via webhooks (real-time) through `event_from_webhook` and are
+//! dispatched through the shared `Engine`.
 
 use anyhow::{Result, bail};
 use serde_json::Value;
@@ -15,7 +13,6 @@ use crate::config::Config;
 /// Marks comments written by Factory so they never re-trigger a request.
 pub const REPORT_MARKER: &str = "<!-- factory:mention-report -->";
 
-const CURSOR_OVERLAP_SECS: u64 = 5;
 const DAY_SECS: u64 = 86_400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,16 +68,8 @@ fn body_hash(body: &str) -> String {
     hex::encode(&digest[..16])
 }
 
-/// A GitHub source of trigger events. Implemented by the standalone poller now
-/// and by a Gateway client later.
-pub trait EventSource {
-    fn fetch(&mut self, repo: &str, since: Option<&str>) -> Result<Vec<TriggerEvent>>;
-}
-
-/// Cursor, dedupe and audit persistence.
+/// Dedupe and audit persistence.
 pub trait EventStore {
-    fn cursor(&self, repo: &str) -> Option<String>;
-    fn set_cursor(&self, repo: &str, cursor: &str) -> Result<()>;
     fn seen(&self, key: &str) -> bool;
     fn record(&self, key: &str, status: &str, detail: &str) -> Result<()>;
     fn count_launched_since(&self, since: u64) -> usize;
@@ -105,38 +94,17 @@ pub enum Outcome {
     Failed(String),
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Summary {
-    pub ignored: usize,
-    pub rejected: usize,
-    pub launched: usize,
-    pub failed: usize,
-}
-
-impl Summary {
-    fn add(&mut self, outcome: &Outcome) {
-        match outcome {
-            Outcome::Ignored(_) => self.ignored += 1,
-            Outcome::Rejected(_) => self.rejected += 1,
-            Outcome::Launched(_) => self.launched += 1,
-            Outcome::Failed(_) => self.failed += 1,
-        }
-    }
-}
-
 mod dispatch;
 mod engine;
 mod github;
 mod parse;
 mod store;
 
-pub use dispatch::{
-    AgentDispatcher, build_mention_prompt, discover_pr_url, format_timestamp, parse_timestamp,
-};
+pub use dispatch::{AgentDispatcher, build_mention_prompt, discover_pr_url};
 pub use engine::Engine;
-pub use github::{GhAuthorizer, GhEventSource, event_from_webhook};
 #[cfg(test)]
-pub(super) use github::{comment_event, issue_event};
+pub(super) use github::issue_event;
+pub use github::{GhAuthorizer, event_from_webhook};
 pub use parse::{CancelInvocation, Invocation, parse_cancel_invocation, parse_invocation};
 pub use store::SqliteEventStore;
 

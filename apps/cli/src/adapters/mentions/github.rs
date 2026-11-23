@@ -1,42 +1,5 @@
 use super::*;
 
-/// `gh`-backed polling source (authenticated with the maintainer's `gh` login).
-pub struct GhEventSource;
-
-impl EventSource for GhEventSource {
-    fn fetch(&mut self, repo: &str, since: Option<&str>) -> Result<Vec<TriggerEvent>> {
-        let since = since.unwrap_or("1970-01-01T00:00:00Z");
-        let since = crate::cli::encode_path_segment(since);
-        let mut events = Vec::new();
-
-        let issues = format!(
-            "repos/{repo}/issues?state=all&sort=updated&direction=asc&per_page=100&since={since}"
-        );
-        for value in gh_array(&issues)? {
-            if let Some(event) = issue_event(repo, &value) {
-                events.push(event);
-            }
-        }
-
-        let comments = format!(
-            "repos/{repo}/issues/comments?sort=updated&direction=asc&per_page=100&since={since}"
-        );
-        for value in gh_array(&comments)? {
-            if let Some(event) = comment_event(repo, &value) {
-                events.push(event);
-            }
-        }
-
-        events.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
-        Ok(events)
-    }
-}
-
-fn gh_array(path: &str) -> Result<Vec<Value>> {
-    let value = gh_json(path)?;
-    Ok(value.as_array().cloned().unwrap_or_default())
-}
-
 fn gh_json(path: &str) -> Result<Value> {
     let output = Command::new("gh").args(["api", path]).output()?;
     if !output.status.success() {
@@ -68,27 +31,6 @@ pub fn issue_event(repo: &str, value: &Value) -> Option<TriggerEvent> {
         author,
         author_is_bot,
         is_pr: value.get("pull_request").is_some(),
-        updated_at,
-    })
-}
-
-pub fn comment_event(repo: &str, value: &Value) -> Option<TriggerEvent> {
-    let issue_url = value.get("issue_url").and_then(Value::as_str)?;
-    let number = issue_url.rsplit('/').next()?.parse().ok()?;
-    let updated_at = value.get("updated_at").and_then(Value::as_str)?.to_string();
-    let id = value.get("id").and_then(id_string)?;
-    let (author, author_is_bot) = author_of(value.get("user"));
-    Some(TriggerEvent {
-        repo: repo.to_string(),
-        kind: EventKind::Comment,
-        id,
-        number,
-        title: String::new(),
-        body: text(value, "body"),
-        url: url_of(value),
-        author,
-        author_is_bot,
-        is_pr: false,
         updated_at,
     })
 }

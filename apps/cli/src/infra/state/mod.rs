@@ -78,29 +78,7 @@ mod mention_event_store {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-mod mention_cursor_store {
-    use sea_orm::entity::prelude::*;
-
-    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-    #[sea_orm(table_name = "mention_cursors")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub repo: String,
-        pub cursor: String,
-        pub updated_at: i64,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {}
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
 use issue_store::{ActiveModel as IssueActiveModel, Entity as IssueEntity};
-use mention_cursor_store::{
-    ActiveModel as MentionCursorActiveModel, Column as MentionCursorColumn,
-    Entity as MentionCursorEntity,
-};
 use mention_event_store::{
     ActiveModel as MentionEventActiveModel, Column as MentionEventColumn,
     Entity as MentionEventEntity,
@@ -226,7 +204,6 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
         schema.create_table_from_entity(ProjectEntity),
         schema.create_table_from_entity(IssueEntity),
         schema.create_table_from_entity(MentionEventEntity),
-        schema.create_table_from_entity(MentionCursorEntity),
     ] {
         let mut stmt = stmt;
         stmt.if_not_exists();
@@ -244,10 +221,7 @@ mod mentions_store;
 mod projects;
 
 pub use issues::{issue_state, load_state, save_state, update_issue_state};
-pub use mentions_store::{
-    count_mention_launches_since, mention_cursor, mention_event_seen, record_mention_event,
-    set_mention_cursor,
-};
+pub use mentions_store::{count_mention_launches_since, mention_event_seen, record_mention_event};
 pub use projects::{load_projects, sync_projects};
 
 #[cfg(test)]

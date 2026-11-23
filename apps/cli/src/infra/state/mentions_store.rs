@@ -1,46 +1,5 @@
 use super::*;
 
-async fn mention_cursor_db(path: PathBuf, repo: String) -> Result<Option<String>> {
-    let db = connect(&path).await?;
-    let row = MentionCursorEntity::find_by_id(repo).one(&db).await?;
-    Ok(row.map(|r| r.cursor))
-}
-
-pub fn mention_cursor(repo: &str) -> Option<String> {
-    let path = state_file();
-    run_async(mention_cursor_db(path, repo.to_string()))
-        .ok()
-        .flatten()
-}
-
-async fn set_mention_cursor_db(path: PathBuf, repo: String, cursor: String) -> Result<()> {
-    let db = connect(&path).await?;
-    let ts = now() as i64;
-    let am = MentionCursorActiveModel {
-        repo: Set(repo),
-        cursor: Set(cursor),
-        updated_at: Set(ts),
-    };
-    MentionCursorEntity::insert(am)
-        .on_conflict(
-            OnConflict::column(MentionCursorColumn::Repo)
-                .update_columns([MentionCursorColumn::Cursor, MentionCursorColumn::UpdatedAt])
-                .to_owned(),
-        )
-        .exec(&db)
-        .await?;
-    Ok(())
-}
-
-pub fn set_mention_cursor(repo: &str, cursor: &str) -> Result<()> {
-    let path = state_file();
-    run_async(set_mention_cursor_db(
-        path,
-        repo.to_string(),
-        cursor.to_string(),
-    ))
-}
-
 async fn mention_event_seen_db(path: PathBuf, key: String) -> Result<bool> {
     let db = connect(&path).await?;
     Ok(MentionEventEntity::find_by_id(key)

@@ -17,8 +17,6 @@ Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
     "usernames": ["your-github-login"],
     "command": "factory",
     "allowed_authors": [],
-    "poll_interval_secs": 60,
-    "initial_lookback_secs": 300,
     "daily_quota": 20,
     "report": true
   }
@@ -31,8 +29,6 @@ Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
 | `usernames` | Trigger identities, without `@`. Case-insensitive. Your own login is enough for self-mentions. |
 | `command` | Explicit command required after the mention. Empty means any mention triggers. |
 | `allowed_authors` | Extra logins allowed to trigger. Others are checked for repository write permission. |
-| `poll_interval_secs` | Delay between polls. Minimum 5 seconds. |
-| `initial_lookback_secs` | How far back the first poll looks before a cursor exists. |
 | `daily_quota` | Maximum launches per rolling 24 hours. `0` disables the quota. |
 | `report` | Comment the outcome back on the issue/PR. |
 
@@ -49,24 +45,10 @@ executed as a shell command.
 
 ## Usage
 
-Webhook mode (recommended when you already run `factory listen`): `factory listen`
-now also processes `issue_comment`, `issues`, and `pull_request` mention events in
-real time, reusing the same parser, authorization, dedup, and dispatch logic. No
-polling delay.
-
-Polling fallback (no public webhook endpoint needed):
-
-```bash
-factory mentions --once        # one poll (useful for cron/tests)
-factory mentions               # poll continuously
-factory mentions --interval 120
-```
-
-```ini
-[Service]
-ExecStart=%h/.local/bin/factory mentions
-Restart=on-failure
-```
+Webhook mode: `factory listen` processes `issue_comment`, `issues`,
+`pull_request`, and `pull_request_review_comment` mention events in real time,
+reusing the same parser, authorization, dedup, and dispatch logic. No polling
+delay. A public webhook endpoint (tunnel/GitHub App/gateway) is required.
 
 ## Permissions
 
@@ -85,31 +67,17 @@ An event is accepted only when all of these hold:
 Being mentioned is not permission to execute: the author is checked, not the
 mentioned account.
 
-## Polling, deduplication and restarts
+## Deduplication and restarts
 
-- Sources: `GET /repos/{repo}/issues` and
-  `GET /repos/{repo}/issues/comments`, both filtered by `since` and sorted by
-  update time. This covers issue bodies, issue comments, PR bodies and PR
-  conversation comments.
-- The cursor is stored per repository in
-  `~/.config/ailuracollective/factory/factory.db` (`mention_cursors`) and
-  survives restarts.
-- The cursor overlaps the last event by five seconds. Duplicate events are
-  filtered by audit key `repo:kind:id:body-hash`, persisted in `mention_events`,
-  so a restart does not execute the same revision twice. The body hash is used
-  because an issue's `updated_at` also changes when other people comment.
+- Duplicate events are filtered by audit key `repo:kind:id:body-hash`, persisted
+  in `mention_events`, so a webhook replay does not execute the same revision
+  twice. The body hash is used because an issue's `updated_at` also changes when
+  other people comment.
 - Editing an issue or comment body changes its hash, so the edited revision is
   evaluated again. Title-only edits are not re-evaluated.
 - Bot-authored events (`user.type == "Bot"` or logins ending in `[bot]`) are
   ignored. Factory's own status comments carry `<!-- factory:mention-report -->`
   and never trigger work, so bot loops cannot form.
-- One poll processes at most 100 issues and 100 comments per repository (two
-  authenticated `gh` requests per repo per poll). Requests are dispatched one at
-  a time, and `daily_quota` caps the rolling 24-hour volume. The poll interval
-  bounds request rate.
-- Agent launches wait for completion (the existing `t3 ... --wait` behavior), so
-  polling pauses while an agent runs. Mentions that arrive meanwhile are picked
-  up on the next poll.
 - Accepted, rejected, completed and failed requests are audited in
   `mention_events` with the reason and, on success, the agent thread id.
 
@@ -122,16 +90,12 @@ new GitHub App or bot account is required.
 
 ## Limitations
 
-- Webhook mode needs a reachable endpoint (tunnel/GitHub App/gateway). Polling
-  fallback adds up to `poll_interval_secs` of latency.
-- Polling fetches at most 100 updated issues and 100 updated comments per
-  repository per poll; a large backlog is caught up over subsequent polls.
+- Webhook mode needs a reachable endpoint (tunnel/GitHub App/gateway).
 - Inline PR review comments (`pull_request_review_comment`) are handled by
-  webhooks; the polling fallback does not fetch them yet.
+  webhooks.
 - Requests from pull request conversation comments are dispatched as an
   issue-style agent run with a note to inspect the PR; there is no special
   "update the existing PR branch" flow yet.
-- The standalone poller is a separate process, not part of `factory start`.
 - The authenticated `gh` user authors the report comments, so they look like
   the maintainer's own comments (they are marked and ignored as triggers).
 - A GitHub outage or missing `gh` auth skips that repository for the poll; the
@@ -139,9 +103,7 @@ new GitHub App or bot account is required.
 
 ## Migration path to Gateway
 
-Event ingestion is behind `mentions::EventSource`; parsing, authorization,
-deduplication, auditing and dispatch live in `mentions::Engine`. Moving to the
-Gateway means adding a Gateway-backed `EventSource` (and eventually a
-Gateway-backed `EventStore`) and selecting it from the CLI. The standalone
-poller can stay as a fallback until the Gateway is deployed and its policy model
-matches the authorization rules above.
+Mention events are processed from webhooks in real time via `factory listen`.
+Parsing, authorization, deduplication, auditing and dispatch live in
+`mentions::Engine`. A Gateway-backed deployment can forward webhook events to the
+runner over a push channel instead of polling.

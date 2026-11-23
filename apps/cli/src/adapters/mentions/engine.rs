@@ -22,55 +22,6 @@ impl<'a> Engine<'a> {
         }
     }
 
-    /// Poll every enabled allowlisted repo and process new revisions.
-    pub fn poll(&self, source: &mut dyn EventSource, now: u64) -> Result<Summary> {
-        let mut summary = Summary::default();
-        let lookback = self.config.mentions.initial_lookback_secs;
-        for repo in self.config.repos.iter().filter(|r| r.enabled) {
-            if repo.github.trim().is_empty() {
-                continue;
-            }
-            let cursor = self.store.cursor(&repo.github);
-            let since = cursor
-                .clone()
-                .unwrap_or_else(|| format_timestamp(now.saturating_sub(lookback)));
-            let events = match source.fetch(&repo.github, Some(&since)) {
-                Ok(events) => events,
-                Err(e) => {
-                    tracing::error!(repo = %repo.github, "mention poll failed: {e}");
-                    continue;
-                }
-            };
-            let mut max_ts = parse_timestamp(&since).unwrap_or(0);
-            let mut cancels = Vec::new();
-            let mut others = Vec::new();
-            for event in &events {
-                if let Some(ts) = parse_timestamp(&event.updated_at) {
-                    max_ts = max_ts.max(ts);
-                }
-                if parse_cancel_invocation(&event.body, &self.config.mentions).is_some() {
-                    cancels.push(event.clone());
-                } else {
-                    others.push(event.clone());
-                }
-            }
-            for event in &cancels {
-                summary.add(&self.handle(event, now));
-            }
-            for event in &others {
-                summary.add(&self.handle(event, now));
-            }
-            let cursor_ts = cursor.as_deref().and_then(parse_timestamp).unwrap_or(0);
-            if max_ts > 0 && max_ts > cursor_ts {
-                let next = format_timestamp(max_ts.saturating_sub(CURSOR_OVERLAP_SECS));
-                if let Err(e) = self.store.set_cursor(&repo.github, &next) {
-                    tracing::error!(repo = %repo.github, "failed to save mention cursor: {e}");
-                }
-            }
-        }
-        Ok(summary)
-    }
-
     /// Authorize and execute one event. Dedupe and audit are persisted.
     pub fn handle(&self, event: &TriggerEvent, now: u64) -> Outcome {
         let key = event.audit_key();
