@@ -89,7 +89,7 @@ fn default_true() -> bool {
 impl Default for MentionsConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             usernames: Vec::new(),
             usernames_extra: Vec::new(),
             command: default_mention_command(),
@@ -244,7 +244,7 @@ mod tests {
             "defaults": {"provider": "opencode", "model": "m", "base_branch": "main", "label": "status/ready"}
         }"#;
         let cfg: Config = serde_json::from_str(json).unwrap();
-        assert!(!cfg.mentions.enabled);
+        assert!(cfg.mentions.enabled);
         assert_eq!(cfg.mentions.command, "factory");
         assert!(cfg.mentions.report);
     }

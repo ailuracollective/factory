@@ -28,25 +28,10 @@ enum Commands {
         #[command(subcommand)]
         action: RepoAction,
     },
-    /// Start the daemon
-    Start,
-    /// Stop the daemon
-    Stop,
-    /// Restart the daemon
-    Restart,
-    /// Show status
-    Status,
     /// Manage secret
     Secret {
         #[command(subcommand)]
         action: SecretAction,
-    },
-    /// Show daemon logs
-    Logs {
-        #[arg(short, long)]
-        follow: bool,
-        #[arg(short = 'n', long, default_value = "50")]
-        lines: u32,
     },
     /// Run diagnostics
     Doctor,
@@ -59,36 +44,36 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// Run the webhook listener (foreground)
-    Listen {
-        #[arg(long)]
-        port: Option<u16>,
-    },
-    /// Register this runner with a gateway
-    Connect {
-        gateway: String,
-        runner: String,
-        #[arg(long)]
-        bootstrap_secret: Option<String>,
-    },
-    /// Run as a connected runner (poll gateway for jobs)
-    Runner {
-        #[arg(long)]
-        once: bool,
-    },
-    /// Manually launch an agent for an issue
-    Test {
-        repo: String,
-        issue: u64,
-        #[arg(long)]
-        prompt: Option<String>,
-    },
-    /// Launch an agent with a custom prompt (no issue)
-    Run {
-        repo: String,
-        #[arg(long)]
-        prompt: String,
-    },
+    /// Start the daemon (deprecated: use `daemon start`)
+    #[command(hide = true)]
+    Start,
+    /// Stop the daemon (deprecated: use `daemon stop`)
+    #[command(hide = true)]
+    Stop,
+    /// Restart the daemon (deprecated: use `daemon restart`)
+    #[command(hide = true)]
+    Restart,
+    /// Show status (deprecated: use `daemon status`)
+    #[command(hide = true)]
+    Status,
+    /// Show daemon logs (deprecated: use `daemon logs`)
+    #[command(hide = true)]
+    Logs { #[arg(short, long)] follow: bool, #[arg(short = 'n', long, default_value = "50")] lines: u32 },
+    /// Run the webhook listener (deprecated: use `gateway listen`)
+    #[command(hide = true)]
+    Listen { #[arg(long)] port: Option<u16> },
+    /// Register this runner (deprecated: use `gateway connect`)
+    #[command(hide = true)]
+    Connect { gateway: String, runner: String, #[arg(long)] bootstrap_secret: Option<String> },
+    /// Run as connected runner (deprecated: use `gateway runner`)
+    #[command(hide = true)]
+    Runner { #[arg(long)] once: bool },
+    /// Launch agent for issue (deprecated: use `agent run`)
+    #[command(hide = true)]
+    Test { repo: String, issue: u64, #[arg(long)] prompt: Option<String> },
+    /// Launch agent with prompt (deprecated: use `agent prompt`)
+    #[command(hide = true)]
+    Run { repo: String, #[arg(long)] prompt: String },
     /// Cancel a running or queued execution
     Cancel {
         /// Execution ID (preferred)
