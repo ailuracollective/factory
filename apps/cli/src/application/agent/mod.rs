@@ -180,10 +180,9 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
         .arg("--model")
         .arg(&model)
         .arg("--worktree")
+        .arg(&base_branch)
         .arg("--branch")
         .arg(&branch)
-        .arg("--base-ref")
-        .arg(&base_branch)
         .arg("--wait")
         .arg("--json")
         .current_dir(project);
@@ -322,9 +321,8 @@ mod tests {
         let flag = args.iter().position(|a| *a == "--provider").unwrap();
         assert_eq!(args[flag + 1], "opencode");
         assert!(!args.contains(&"--harness"));
-        assert!(args.contains(&"--worktree"));
         assert_eq!(
-            args[args.iter().position(|a| *a == "--base-ref").unwrap() + 1],
+            args[args.iter().position(|a| *a == "--worktree").unwrap() + 1],
             "main"
         );
 
