@@ -17,12 +17,14 @@ By default, use a single bot with a modular monolith architecture. Split into mu
 A single bot identity and codebase, with well-separated modules (notifications, commands, moderation, etc.).
 
 Advantages:
+
 - One token, one invitation, and one set of permissions to manage.
 - Centralized configuration, deployment, and troubleshooting.
 - Simple shared state (one Gateway connection, one database).
 - Easier to iterate on an MVP.
 
 Disadvantages:
+
 - A failure or heavy workload can affect everything.
 - All modules share the same Gateway rate limits.
 - All features have the same permissions.
@@ -32,12 +34,14 @@ Disadvantages:
 Each major feature has its own bot (application, token, and identity).
 
 Advantages:
+
 - Clear permission and trust boundaries (e.g., an admin bot vs. a notification bot).
 - Independent releases, uptime, and ownership.
 - One bot going down does not take other features with it.
 - Different teams can own different bots.
 
 Disadvantages:
+
 - Multiple tokens, invitations, and per-server configurations.
 - Duplicated infrastructure, monitoring, and command management.
 - Bots may need coordination or shared data.
@@ -77,9 +81,9 @@ Start with a modular bot. Split only when you can point to a concrete operationa
 
 ## Sources
 
-- Discord Gateway docs (sharding): https://github.com/discord/discord-api-docs
-- Discord Interactions overview (HTTP endpoint): https://github.com/discord/discord-api-docs
-- Discord Bot users / OAuth2: https://github.com/discord/discord-api-docs
+- Discord Gateway docs (sharding): <https://github.com/discord/discord-api-docs>
+- Discord Interactions overview (HTTP endpoint): <https://github.com/discord/discord-api-docs>
+- Discord Bot users / OAuth2: <https://github.com/discord/discord-api-docs>
 - Comunidad: r/Discord_Bots, r/Discordjs (consenso: modular monolith primero)
 
 ## Decision for Mochi
