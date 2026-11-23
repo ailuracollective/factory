@@ -117,22 +117,36 @@ enum Commands {
         pr: Option<u64>,
         #[arg(long)]
         force: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
 #[derive(Subcommand)]
 enum RepoAction {
     /// Add a repo (defaults to the current directory)
-    Add { repo: Option<String> },
+    Add {
+        repo: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List repos
     List {
         #[arg(long)]
         json: bool,
     },
     /// Remove a repo
-    Remove { name: String },
+    Remove {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync labels for a repo
-    Sync { name: String },
+    Sync {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Check whether repos are correctly configured
     Check {
         name: Option<String>,
@@ -175,10 +189,10 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Commands::Init { force, global } => cli::init(force, !global),
         Commands::Repo { action } => match action {
-            RepoAction::Add { repo } => cli::repo_add(repo.as_deref().unwrap_or(".")),
+            RepoAction::Add { repo, json } => cli::repo_add(repo.as_deref().unwrap_or("."), json),
             RepoAction::List { json } => cli::repo_list(json),
-            RepoAction::Remove { name } => cli::repo_remove(&name),
-            RepoAction::Sync { name } => cli::repo_sync(&name),
+            RepoAction::Remove { name, json } => cli::repo_remove(&name, json),
+            RepoAction::Sync { name, json } => cli::repo_sync(&name, json),
             RepoAction::Check { name, json } => cli::repo_check(name.as_deref(), json),
         },
         Commands::Start => cli::start(),
@@ -218,7 +232,8 @@ fn main() -> ExitCode {
             issue,
             pr,
             force,
-        } => cli::cancel(execution_id.as_deref(), repo.as_deref(), issue, pr, force),
+            json,
+        } => cli::cancel(execution_id.as_deref(), repo.as_deref(), issue, pr, force, json),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

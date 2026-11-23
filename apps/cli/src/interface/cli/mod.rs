@@ -78,12 +78,17 @@ fn generate_secret() -> String {
     "0000000000000000000000000000000000000000000000000000000000000000".to_string()
 }
 
-pub fn repo_add(name_or_path: &str) -> Result<()> {
+pub fn repo_add(name_or_path: &str, json: bool) -> Result<()> {
     let entry = match add_repo(name_or_path) {
         Some(e) => e,
         None => {
-            println!("Failed to add repo: {}", name_or_path);
-            return Ok(());
+            if json {
+                use crate::interface::output::{OutputError, to_json};
+                println!("{}", to_json(&OutputError::new("REPO_ADD_FAILED", format!("Failed to add repo: {}", name_or_path))).unwrap());
+            } else {
+                println!("Failed to add repo: {}", name_or_path);
+            }
+            anyhow::bail!("failed to add repo: {}", name_or_path);
         }
     };
     let config = load_config()?;
@@ -101,9 +106,16 @@ pub fn repo_add(name_or_path: &str) -> Result<()> {
         save_config(&cfg)?;
         println!("Webhook created (id={})", hook_id);
     }
-    println!("Repo added: {} -> {}", entry.name, entry.path);
     let n = sync_labels(&entry.github);
-    println!("Labels synced: {}", n);
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct R { name: String, github: String, path: String, labels_synced: u32 }
+        println!("{}", to_json(&OutputEnvelope::new(R { name: entry.name.clone(), github: entry.github.clone(), path: entry.path.clone(), labels_synced: n })).unwrap());
+    } else {
+        println!("Repo added: {} -> {}", entry.name, entry.path);
+        println!("Labels synced: {}", n);
+    }
     Ok(())
 }
 
@@ -145,26 +157,51 @@ pub fn repo_list(json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn repo_remove(name: &str) -> Result<()> {
+pub fn repo_remove(name: &str, json: bool) -> Result<()> {
     if remove_repo(name) {
-        println!("Repo removed: {}", name);
+        if json {
+            use crate::interface::output::{OutputEnvelope, to_json};
+            #[derive(serde::Serialize)]
+            struct R { name: String, removed: bool }
+            println!("{}", to_json(&OutputEnvelope::new(R { name: name.to_string(), removed: true })).unwrap());
+        } else {
+            println!("Repo removed: {}", name);
+        }
     } else {
-        println!("Repo not found: {}", name);
+        if json {
+            use crate::interface::output::{OutputError, to_json};
+            println!("{}", to_json(&OutputError::new("REPO_NOT_FOUND", format!("Repo not found: {}", name))).unwrap());
+        } else {
+            println!("Repo not found: {}", name);
+        }
+        anyhow::bail!("repo not found: {}", name);
     }
     Ok(())
 }
 
-pub fn repo_sync(name: &str) -> Result<()> {
+pub fn repo_sync(name: &str, json: bool) -> Result<()> {
     let config = load_config()?;
     let repo = match get_repo(&config, name) {
         Some(r) => r.clone(),
         None => {
-            println!("Repo not found: {}", name);
-            return Ok(());
+            if json {
+                use crate::interface::output::{OutputError, to_json};
+                println!("{}", to_json(&OutputError::new("REPO_NOT_FOUND", format!("Repo not found: {}", name))).unwrap());
+            } else {
+                println!("Repo not found: {}", name);
+            }
+            anyhow::bail!("repo not found: {}", name);
         }
     };
     let n = sync_labels(&repo.github);
-    println!("Synced {} labels for {}", n, repo.github);
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct R { name: String, github: String, labels_synced: u32 }
+        println!("{}", to_json(&OutputEnvelope::new(R { name: name.to_string(), github: repo.github.clone(), labels_synced: n })).unwrap());
+    } else {
+        println!("Synced {} labels for {}", n, repo.github);
+    }
     Ok(())
 }
 
