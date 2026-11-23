@@ -1196,7 +1196,9 @@ struct DaemonReloadReport {
 pub fn daemon_reload(config_path: Option<&str>, json: bool) -> anyhow::Result<()> {
     use crate::config;
     let _current = config::load_config()?;
-    let candidate_path = config_path.map(std::path::PathBuf::from).unwrap_or_else(config::config_file);
+    let candidate_path = config_path
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(config::config_file);
     let data = std::fs::read_to_string(&candidate_path)?;
     let _candidate: config::Config = serde_json::from_str(&data)?;
     let report = DaemonReloadReport {
