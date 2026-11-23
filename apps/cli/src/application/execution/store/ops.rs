@@ -164,18 +164,8 @@ pub fn list_cancellable_for_repo(repo: &str) -> Result<Vec<ExecutionRecord>> {
 }
 
 fn transition_allowed(from: ExecutionStatus, to: ExecutionStatus) -> bool {
-    matches!(
-        (from, to),
-        (ExecutionStatus::Queued, ExecutionStatus::Running)
-            | (ExecutionStatus::Queued, ExecutionStatus::Cancelled)
-            | (ExecutionStatus::Queued, ExecutionStatus::Failed)
-            | (ExecutionStatus::Running, ExecutionStatus::Cancelling)
-            | (ExecutionStatus::Running, ExecutionStatus::Completed)
-            | (ExecutionStatus::Running, ExecutionStatus::Failed)
-            | (ExecutionStatus::Running, ExecutionStatus::Cancelled)
-            | (ExecutionStatus::Cancelling, ExecutionStatus::Cancelled)
-            | (ExecutionStatus::Cancelling, ExecutionStatus::Failed)
-    )
+    // Single source of truth: delegate to the FSM guard on ExecutionStatus.
+    from.can_transition_to(to)
 }
 
 pub fn transition_execution(
