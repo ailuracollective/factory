@@ -440,7 +440,16 @@ pub fn config_get() -> Result<()> {
     }
     println!("provider: {}", cfg.defaults.provider);
     println!("model:    {}", cfg.defaults.model);
+    println!("base_branch: {}", cfg.defaults.base_branch);
+    println!("label: {}", cfg.defaults.label);
+    println!("max_attempts: {}", cfg.defaults.max_attempts);
+    println!("mentions.enabled: {}", cfg.mentions.enabled);
     println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
+    println!("mentions.command: {}", cfg.mentions.command);
+    println!("mentions.daily_quota: {}", cfg.mentions.daily_quota);
+    println!("mentions.report: {}", cfg.mentions.report);
+    println!("webhook.port: {}", cfg.webhook.port);
+    println!("webhook.bind: {}", cfg.webhook.bind);
     Ok(())
 }
 
