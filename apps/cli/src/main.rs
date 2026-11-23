@@ -38,19 +38,6 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// List harnesses installed in T3 Code (deprecated: use `agent harnesses`)
-    #[command(hide = true)]
-    Harnesses {
-        #[arg(long)]
-        json: bool,
-    },
-    /// List models of a harness (deprecated: use `agent models`)
-    #[command(hide = true)]
-    Models {
-        harness: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Get/set default config
     Config {
         #[command(subcommand)]
@@ -74,21 +61,6 @@ enum Commands {
     Runner {
         #[arg(long)]
         once: bool,
-    },
-    /// Launch agent for issue (deprecated: use `agent run`)
-    #[command(hide = true)]
-    Test {
-        repo: String,
-        issue: u64,
-        #[arg(long)]
-        prompt: Option<String>,
-    },
-    /// Launch agent with prompt (deprecated: use `agent prompt`)
-    #[command(hide = true)]
-    Run {
-        repo: String,
-        #[arg(long)]
-        prompt: String,
     },
     /// Manage agents
     Agent {
@@ -335,14 +307,6 @@ fn main() -> ExitCode {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(cli::runner(once))
         }
-        Commands::Test {
-            repo,
-            issue,
-            prompt,
-        } => cli::test(&repo, issue, prompt),
-        Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
-        Commands::Harnesses { json } => cli::harnesses(json),
-        Commands::Models { harness, json } => cli::models(&harness, json),
         Commands::Config { action } => match action {
             ConfigAction::Get { json } => cli::config_get(json),
             ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),

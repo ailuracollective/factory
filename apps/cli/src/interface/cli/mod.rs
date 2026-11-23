@@ -1212,7 +1212,7 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
                 && !h.models.iter().any(|m| m == value)
             {
                 println!(
-                    "Unknown model for {}: {}. Use 'factory models {}' to list.",
+                    "Unknown model for {}: {}. Use 'factory agent models {}' to list.",
                     h.name, value, h.name
                 );
                 return Ok(());

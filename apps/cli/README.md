@@ -31,10 +31,8 @@ Run `factory --help` for the full command list. Common commands:
 - `factory daemon run --mode listener [--port N]` — run webhook listener in the foreground
 - `factory runner` — run as a connected runner (receives job pushes)
 - `factory daemon run --mode listener` — run webhook listener (processes GitHub events and runner jobs)
-- `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
-- `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
-- `factory agent harnesses [--json]` (also `factory harnesses`) — list harnesses installed in T3 Code
-- `factory agent models <harness> [--json]` (also `factory models`) — list models of a harness
+- `factory agent harnesses [--json]` — list harnesses installed in T3 Code
+- `factory agent models <harness> [--json]` — list models of a harness
 
 ## Configuration
 
