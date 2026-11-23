@@ -213,7 +213,9 @@ pub fn start() -> Result<()> {
         println!("Factory started.");
         return Ok(());
     }
-    println!("systemd not available. Run 'factory listen' to start the listener in the foreground.");
+    println!(
+        "systemd not available. Run 'factory listen' to start the listener in the foreground."
+    );
     Ok(())
 }
 
