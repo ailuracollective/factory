@@ -55,7 +55,10 @@ enum Commands {
     Restart,
     /// Show status (deprecated: use `daemon status`)
     #[command(hide = true)]
-    Status,
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
     /// Show daemon logs (deprecated: use `daemon logs`)
     #[command(hide = true)]
     Logs {
@@ -174,7 +177,7 @@ fn main() -> ExitCode {
         Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),
         Commands::Restart => cli::restart(),
-        Commands::Status => cli::status(),
+        Commands::Status { json } => cli::status(json),
         Commands::Secret { action } => match action {
             SecretAction::Rotate => cli::secret_rotate(),
         },
