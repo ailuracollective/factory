@@ -23,6 +23,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "usernames": { "type": "array", "items": { "type": "string" } },
+        "usernames_extra": { "type": "array", "items": { "type": "string" } },
         "command": { "type": "string" },
         "allowed_authors": { "type": "array", "items": { "type": "string" } },
         "daily_quota": { "type": "integer", "minimum": 0 },

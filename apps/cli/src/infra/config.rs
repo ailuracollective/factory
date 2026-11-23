@@ -52,6 +52,9 @@ pub struct MentionsConfig {
     /// GitHub logins (without `@`) that act as trigger identities.
     #[serde(default)]
     pub usernames: Vec<String>,
+    /// Additional trigger usernames merged on top of the global list.
+    #[serde(default)]
+    pub usernames_extra: Vec<String>,
     /// Explicit command required after the mention, e.g. `@alice factory fix it`.
     /// Empty means any mention triggers.
     #[serde(default = "default_mention_command")]
@@ -84,6 +87,7 @@ impl Default for MentionsConfig {
         Self {
             enabled: false,
             usernames: Vec::new(),
+            usernames_extra: Vec::new(),
             command: default_mention_command(),
             allowed_authors: Vec::new(),
             daily_quota: default_daily_quota(),
