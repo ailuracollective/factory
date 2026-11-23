@@ -10,7 +10,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": { "type": "string" },
+        "harness": { "type": "string" },
         "model": { "type": "string" },
         "base_branch": { "type": "string" },
         "label": { "type": "string" },

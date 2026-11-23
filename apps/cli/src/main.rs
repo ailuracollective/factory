@@ -35,10 +35,12 @@ enum Commands {
     },
     /// Run diagnostics
     Doctor,
-    /// List providers
-    Providers,
-    /// List models (optionally by provider)
-    Models { provider: Option<String> },
+    /// List harnesses installed in T3 Code
+    Harnesses,
+    /// List model providers of a harness
+    Providers { harness: String },
+    /// List models of a harness
+    Models { harness: String },
     /// Get/set default config
     Config {
         #[command(subcommand)]
@@ -160,8 +162,9 @@ fn main() -> ExitCode {
             prompt,
         } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
-        Commands::Providers => cli::providers(),
-        Commands::Models { provider } => cli::models(provider.as_deref()),
+        Commands::Harnesses => cli::harnesses(),
+        Commands::Providers { harness } => cli::providers(&harness),
+        Commands::Models { harness } => cli::models(&harness),
         Commands::Config { action } => match action {
             ConfigAction::Get => cli::config_get(),
             ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),

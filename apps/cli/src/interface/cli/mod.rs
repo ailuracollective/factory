@@ -1,4 +1,7 @@
-use crate::config::{Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config, save_config};
+use crate::config::{
+    Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config,
+    save_config,
+};
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -23,14 +26,16 @@ pub(super) fn run(cmd: &[&str]) -> (i32, String) {
 
 pub fn init(force: bool, local: bool) -> Result<()> {
     if local {
-        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("factory.json");
         if path.exists() && !force {
             println!("factory.json already exists. Use --force to overwrite.");
             return Ok(());
         }
         let fc = FactoryRepoConfig {
             defaults: Some(Defaults {
-                provider: String::new(),
+                harness: String::new(),
                 model: String::new(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
@@ -372,18 +377,58 @@ pub use runner_cmd::runner;
 #[cfg(test)]
 mod tests;
 
-pub fn providers() -> Result<()> {
-    let (code, out) = run(&["opencode", "models"]);
-    if code != 0 {
-        println!("Failed to list models: {}", out);
+pub fn harnesses() -> Result<()> {
+    let installed = crate::t3::harnesses();
+    if installed.is_empty() {
+        println!("No installed harnesses found. Start T3 Code once so it can probe them.");
         return Ok(());
     }
-    let mut providers: Vec<String> = out
-        .lines()
-        .filter_map(|l| l.split('/').next())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let configured = cached_default_harness();
+    let name_w = installed.iter().map(|h| h.name.len()).max().unwrap_or(0);
+    let display_w = installed
+        .iter()
+        .map(|h| h.display_name.len())
+        .max()
+        .unwrap_or(0);
+    for h in installed {
+        let mark = if configured.as_deref() == Some(h.name.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        println!(
+            "{} {:<name_w$}  {:<display_w$}  {:<8} {:>3} models  {}",
+            mark,
+            h.name,
+            h.display_name,
+            h.version.as_deref().unwrap_or("-"),
+            h.models.len(),
+            h.status,
+        );
+    }
+    Ok(())
+}
+
+/// Configured harness resolved to a T3 id, used to flag the default row.
+fn cached_default_harness() -> Option<String> {
+    let configured = load_config().ok()?.defaults.harness;
+    if configured.trim().is_empty() {
+        return None;
+    }
+    Some(crate::t3::resolve_harness(&configured))
+}
+
+pub fn providers(harness: &str) -> Result<()> {
+    let name = crate::t3::resolve_harness(harness);
+    let Some(h) = crate::t3::harness(&name) else {
+        println!(
+            "Unknown harness: {}. Available: {}",
+            name,
+            available_harnesses()
+        );
+        return Ok(());
+    };
+    let mut providers: Vec<String> = h.models.iter().filter_map(|m| m.provider.clone()).collect();
     providers.sort();
     providers.dedup();
     for p in providers {
@@ -392,25 +437,29 @@ pub fn providers() -> Result<()> {
     Ok(())
 }
 
-pub fn models(provider: Option<&str>) -> Result<()> {
-    let (code, out) = run(&["opencode", "models"]);
-    if code != 0 {
-        println!("Failed to list models: {}", out);
+pub fn models(harness: &str) -> Result<()> {
+    let name = crate::t3::resolve_harness(harness);
+    let Some(h) = crate::t3::harness(&name) else {
+        println!(
+            "Unknown harness: {}. Available: {}",
+            name,
+            available_harnesses()
+        );
         return Ok(());
-    }
-    for line in out.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(p) = provider
-            && !line.starts_with(&format!("{}/", p))
-        {
-            continue;
-        }
-        println!("{}", line);
+    };
+    for m in h.models {
+        println!("{}", m.slug);
     }
     Ok(())
+}
+
+fn available_harnesses() -> String {
+    let names: Vec<String> = crate::t3::harnesses().into_iter().map(|h| h.name).collect();
+    if names.is_empty() {
+        "none (start T3 Code so it can probe them)".to_string()
+    } else {
+        names.join(", ")
+    }
 }
 
 pub fn config_get() -> Result<()> {
@@ -418,8 +467,8 @@ pub fn config_get() -> Result<()> {
     // Apply repo-level factory.json if present in cwd or an ancestor.
     if let Some(repo_cfg) = find_factory_config() {
         if let Some(d) = repo_cfg.defaults {
-            if !d.provider.is_empty() {
-                cfg.defaults.provider = d.provider;
+            if !d.harness.is_empty() {
+                cfg.defaults.harness = d.harness;
             }
             if !d.model.is_empty() {
                 cfg.defaults.model = d.model;
@@ -458,14 +507,21 @@ pub fn config_get() -> Result<()> {
             }
         }
     }
-    println!("provider: {}", cfg.defaults.provider);
+    // Show the harness T3 will actually receive (legacy values resolve).
+    println!(
+        "harness:  {}",
+        crate::t3::resolve_harness(&cfg.defaults.harness)
+    );
     println!("model:    {}", cfg.defaults.model);
     println!("base_branch: {}", cfg.defaults.base_branch);
     println!("label: {}", cfg.defaults.label);
     println!("max_attempts: {}", cfg.defaults.max_attempts);
     println!("mentions.enabled: {}", cfg.mentions.enabled);
     println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
-    println!("mentions.usernames_extra: {}", cfg.mentions.usernames_extra.join(", "));
+    println!(
+        "mentions.usernames_extra: {}",
+        cfg.mentions.usernames_extra.join(", ")
+    );
     println!("mentions.command: {}", cfg.mentions.command);
     println!("mentions.daily_quota: {}", cfg.mentions.daily_quota);
     println!("mentions.report: {}", cfg.mentions.report);
@@ -488,41 +544,82 @@ fn find_factory_config() -> Option<FactoryRepoConfig> {
 }
 
 pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
-    // validate against opencode models
-    let (code, out) = run(&["opencode", "models"]);
-    let models: Vec<&str> = if code == 0 {
-        out.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect()
-    } else {
-        Vec::new()
-    };
     if !global {
-        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("factory.json");
         let mut fc: FactoryRepoConfig = if path.exists() {
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default())
+                .unwrap_or_default()
         } else {
             FactoryRepoConfig::default()
         };
-        if fc.defaults.is_none() { fc.defaults = Some(Defaults { provider: String::new(), model: String::new(), base_branch: String::new(), label: String::new(), max_attempts: 0 }); }
-        if fc.mentions.is_none() { fc.mentions = Some(MentionsConfig::default()); }
+        if fc.defaults.is_none() {
+            fc.defaults = Some(Defaults {
+                harness: String::new(),
+                model: String::new(),
+                base_branch: String::new(),
+                label: String::new(),
+                max_attempts: 0,
+            });
+        }
+        if fc.mentions.is_none() {
+            fc.mentions = Some(MentionsConfig::default());
+        }
         let d = fc.defaults.as_mut().unwrap();
         let m = fc.mentions.as_mut().unwrap();
         match key {
-            "provider" => d.provider = value.to_string(),
+            "harness" => d.harness = value.to_string(),
             "model" => d.model = value.to_string(),
             "base_branch" => d.base_branch = value.to_string(),
             "label" => d.label = value.to_string(),
-            "max_attempts" => { if let Ok(n)=value.parse(){ d.max_attempts=n; } else { println!("Invalid number: {}", value); return Ok(());} }
-            "mentions.enabled" => m.enabled = value=="true"||value=="1",
-            "mentions.usernames" => { m.usernames = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
+            "max_attempts" => {
+                if let Ok(n) = value.parse() {
+                    d.max_attempts = n;
+                } else {
+                    println!("Invalid number: {}", value);
+                    return Ok(());
+                }
+            }
+            "mentions.enabled" => m.enabled = value == "true" || value == "1",
+            "mentions.usernames" => {
+                m.usernames = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
             "mentions.command" => m.command = value.to_string(),
-            "mentions.allowed_authors" => { m.allowed_authors = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
-            "mentions.daily_quota" => { if let Ok(n)=value.parse(){ m.daily_quota=n; } else { println!("Invalid number: {}", value); return Ok(());} }
-            "mentions.report" => m.report = value=="true"||value=="1",
-            "mentions.usernames_extra" => { m.usernames_extra = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
-            _ => { println!("Unknown key."); return Ok(()); }
+            "mentions.allowed_authors" => {
+                m.allowed_authors = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            "mentions.daily_quota" => {
+                if let Ok(n) = value.parse() {
+                    m.daily_quota = n;
+                } else {
+                    println!("Invalid number: {}", value);
+                    return Ok(());
+                }
+            }
+            "mentions.report" => m.report = value == "true" || value == "1",
+            "mentions.usernames_extra" => {
+                m.usernames_extra = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            _ => {
+                println!("Unknown key.");
+                return Ok(());
+            }
         }
         std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
         println!("Set {} = {} (local)", key, value);
@@ -530,27 +627,37 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
     }
     let mut cfg = load_config()?;
     match key {
-        "provider" => {
-            let valid = models.iter().any(|m| m.split('/').next() == Some(value));
-            if !valid {
-                println!(
-                    "Unknown provider: {}. Available: {}",
-                    value,
-                    models
-                        .iter()
-                        .map(|m| m.split('/').next().unwrap_or(""))
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                return Ok(());
+        "harness" => {
+            let installed = crate::t3::harnesses();
+            // Validate only when T3 has probed its harnesses; otherwise accept.
+            if !installed.is_empty() {
+                let Some(h) = crate::t3::harness(value) else {
+                    println!(
+                        "Unknown harness: {}. Available: {}",
+                        value,
+                        installed
+                            .iter()
+                            .map(|h| h.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    return Ok(());
+                };
+                cfg.defaults.harness = h.name;
+            } else {
+                cfg.defaults.harness = value.to_string();
             }
-            cfg.defaults.provider = value.to_string();
         }
         "model" => {
-            if !models.contains(&value) {
-                println!("Unknown model: {}. Use 'factory models' to list.", value);
+            let harness = crate::t3::harness(&cfg.defaults.harness);
+            if let Some(h) = &harness
+                && !h.models.is_empty()
+                && !h.models.iter().any(|m| m.slug == value)
+            {
+                println!(
+                    "Unknown model for {}: {}. Use 'factory models {}' to list.",
+                    h.name, value, h.name
+                );
                 return Ok(());
             }
             cfg.defaults.model = value.to_string();
@@ -568,7 +675,12 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         "mentions.enabled" => cfg.mentions.enabled = value == "true" || value == "1",
         "mentions.command" => cfg.mentions.command = value.to_string(),
         "mentions.allowed_authors" => {
-            cfg.mentions.allowed_authors = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            cfg.mentions.allowed_authors = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
         }
         "mentions.daily_quota" => {
             if let Ok(n) = value.parse() {
@@ -580,7 +692,12 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         }
         "mentions.report" => cfg.mentions.report = value == "true" || value == "1",
         "mentions.usernames_extra" => {
-            cfg.mentions.usernames_extra = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            cfg.mentions.usernames_extra = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
         }
         "mentions.usernames" => {
             cfg.mentions.usernames = value
@@ -591,11 +708,19 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
                 .collect();
         }
         _ => {
-            println!("Unknown key: {}. Use 'provider', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.", key);
+            println!(
+                "Unknown key: {}. Use 'harness', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.",
+                key
+            );
             return Ok(());
         }
     }
     save_config(&cfg)?;
-    println!("Set {} = {}", key, value);
+    let stored = if key == "harness" {
+        cfg.defaults.harness.as_str()
+    } else {
+        value
+    };
+    println!("Set {} = {}", key, stored);
     Ok(())
 }

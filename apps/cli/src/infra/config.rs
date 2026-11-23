@@ -22,8 +22,9 @@ fn default_max_attempts() -> u32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Defaults {
+    /// Agent harness passed to T3 (`--provider`).
     #[serde(default)]
-    pub provider: String,
+    pub harness: String,
     #[serde(default)]
     pub model: String,
     #[serde(default)]
@@ -142,7 +143,7 @@ impl Default for Config {
                 funnel_url: String::new(),
             },
             defaults: Defaults {
-                provider: "opencode-go".to_string(),
+                harness: "opencode".to_string(),
                 model: "opencode-go/iceman-contributor-free".to_string(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
@@ -241,12 +242,21 @@ mod tests {
             "projects_base": "/tmp/projects",
             "repo": "",
             "webhook": {"port": 8787, "secret": "", "funnel_url": ""},
-            "defaults": {"provider": "opencode", "model": "m", "base_branch": "main", "label": "status/ready"}
+            "defaults": {"harness": "opencode", "model": "m", "base_branch": "main", "label": "status/ready"}
         }"#;
         let cfg: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.defaults.harness, "opencode");
         assert!(cfg.mentions.enabled);
         assert_eq!(cfg.mentions.command, "factory");
         assert!(cfg.mentions.report);
+    }
+
+    #[test]
+    fn defaults_serialize_as_harness() {
+        let json = serde_json::to_value(Config::default()).unwrap();
+        let defaults = json.get("defaults").unwrap();
+        assert_eq!(defaults.get("harness").unwrap(), "opencode");
+        assert!(defaults.get("provider").is_none());
     }
 
     #[test]
@@ -255,7 +265,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("factory.json"),
-            r#"{"defaults":{"provider":"opencode","model":"m","base_branch":"develop","label":"ready","max_attempts":5}}"#,
+            r#"{"defaults":{"harness":"opencode","model":"m","base_branch":"develop","label":"ready","max_attempts":5}}"#,
         )
         .unwrap();
         let cfg = load_factory_config(&dir).unwrap();
