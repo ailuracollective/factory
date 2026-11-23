@@ -841,7 +841,7 @@ mod ops;
 pub mod runner_cmd;
 
 pub(crate) use ops::encode_path_segment;
-pub use ops::{agent_run, cancel, connect, execution_list, run_prompt, test};
+pub use ops::{agent_check, agent_run, cancel, connect, execution_list, run_prompt, test};
 pub use runner_cmd::runner;
 
 #[cfg(test)]
