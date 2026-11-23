@@ -249,6 +249,8 @@ enum DaemonAction {
     },
     /// Run the daemon in the foreground
     Run {
+        #[arg(long, default_value = "auto")]
+        mode: String,
         #[arg(long)]
         port: Option<u16>,
     },
@@ -278,7 +280,7 @@ fn main() -> ExitCode {
             DaemonAction::Restart => cli::restart(),
             DaemonAction::Status { json } => cli::status(json),
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
-            DaemonAction::Run { port } => cli::listen(port),
+            DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),
         },
         Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),

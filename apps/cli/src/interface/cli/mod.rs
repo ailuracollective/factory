@@ -500,6 +500,36 @@ pub fn listen(port: Option<u16>) -> Result<()> {
     rt.block_on(crate::listener::serve(config))
 }
 
+pub fn daemon_run(mode: &str, port: Option<u16>) -> Result<()> {
+    let mut config = load_config()?;
+    if let Some(p) = port {
+        config.webhook.port = p;
+    }
+    match mode {
+        "listener" => {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(crate::listener::serve(config))
+        }
+        "runner" => {
+            let gw = config.gateway.url.clone();
+            let runner_id = config.gateway.runner_id.clone();
+            let token = config.gateway.token.clone();
+            if gw.is_empty() || runner_id.is_empty() || token.is_empty() {
+                anyhow::bail!(
+                    "runner mode requires gateway url, runner_id, and token; run 'factory connect' first"
+                );
+            }
+            let rt = Runtime::new().unwrap();
+            rt.block_on(crate::listener::serve(config))
+        }
+        "auto" => {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(crate::listener::serve(config))
+        }
+        other => anyhow::bail!("unknown daemon mode: {}", other),
+    }
+}
+
 pub fn status(json: bool) -> Result<()> {
     let (code, msg) = run(&["systemctl", "--user", "is-active", "factory"]);
     // Distinguish active/inactive/unknown; a failure to query systemd is an error.
