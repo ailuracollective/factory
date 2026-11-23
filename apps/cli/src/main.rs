@@ -73,6 +73,8 @@ enum Commands {
     Status {
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        verbose: bool,
     },
     /// Show daemon logs (deprecated: use `daemon logs`)
     #[command(hide = true)]
@@ -239,6 +241,8 @@ enum DaemonAction {
     Status {
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        verbose: bool,
     },
     /// Show daemon logs
     Logs {
@@ -278,14 +282,14 @@ fn main() -> ExitCode {
             DaemonAction::Start => cli::start(),
             DaemonAction::Stop => cli::stop(),
             DaemonAction::Restart => cli::restart(),
-            DaemonAction::Status { json } => cli::status(json),
+            DaemonAction::Status { json, verbose } => cli::status(json, verbose),
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
             DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),
         },
         Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),
         Commands::Restart => cli::restart(),
-        Commands::Status { json } => cli::status(json),
+        Commands::Status { json, verbose } => cli::status(json, verbose),
         Commands::Secret { action } => match action {
             SecretAction::Rotate => cli::secret_rotate(),
         },
