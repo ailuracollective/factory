@@ -38,6 +38,7 @@ pub struct TriggerEvent {
     /// Stable GitHub object id (issue id or comment id).
     pub id: String,
     pub number: u64,
+    pub linked_issue_number: Option<u64>,
     pub title: String,
     pub body: String,
     pub url: String,

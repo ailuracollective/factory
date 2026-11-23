@@ -78,6 +78,29 @@ mod mention_event_store {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+mod pull_request_store {
+    use sea_orm::entity::prelude::*;
+    use uuid::Uuid;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "pull_requests")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        #[sea_orm(unique)]
+        pub url: String,
+        pub issue_key: String,
+        pub number: i64,
+        pub thread_id: Option<String>,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 use issue_store::{ActiveModel as IssueActiveModel, Entity as IssueEntity};
 use mention_event_store::{
     ActiveModel as MentionEventActiveModel, Column as MentionEventColumn,
@@ -86,6 +109,7 @@ use mention_event_store::{
 use project_store::{
     ActiveModel as ProjectActiveModel, Column as ProjectColumn, Entity as ProjectEntity,
 };
+use pull_request_store::{ActiveModel as PullRequestActiveModel, Entity as PullRequestEntity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -213,6 +237,7 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
         schema.create_table_from_entity(ProjectEntity),
         schema.create_table_from_entity(IssueEntity),
         schema.create_table_from_entity(MentionEventEntity),
+        schema.create_table_from_entity(PullRequestEntity),
     ] {
         let mut stmt = stmt;
         stmt.if_not_exists();
@@ -221,6 +246,16 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
     // Lightweight migration for existing DBs.
     let _ = db
         .execute_unprepared("ALTER TABLE issues ADD COLUMN pr_url TEXT")
+        .await;
+    let _ = db
+        .execute_unprepared(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_pull_requests_url ON pull_requests(url)",
+        )
+        .await;
+    let _ = db
+        .execute_unprepared(
+            "CREATE INDEX IF NOT EXISTS idx_pull_requests_issue_key ON pull_requests(issue_key)",
+        )
         .await;
     Ok(db)
 }
@@ -232,6 +267,8 @@ mod projects;
 pub use issues::{issue_state, load_state, save_state, update_issue_state};
 pub use mentions_store::{count_mention_launches_since, mention_event_seen, record_mention_event};
 pub use projects::{load_projects, sync_projects};
+pub use pull_requests::{link_pull_request, linked_pull_requests, pull_request_for_event};
 
+mod pull_requests;
 #[cfg(test)]
 pub mod tests;

@@ -23,17 +23,44 @@ impl Dispatcher for AgentDispatcher {
             tracing::error!("{}", msg);
             return Err(msg);
         }
-        let issue_key = format!("{}#{}", event.repo, event.number);
+        let linked_pr = event
+            .is_pr
+            .then(|| crate::state::pull_request_for_event(&event.repo, event.number))
+            .flatten();
+        let issue_key = linked_pr.as_ref().map_or_else(
+            || format!("{}#{}", event.repo, event.number),
+            |pr| pr.issue_key.clone(),
+        );
+        let issue_number = issue_key
+            .rsplit_once('#')
+            .and_then(|(_, number)| number.parse::<u64>().ok())
+            .unwrap_or(event.number);
         let prior = crate::state::issue_state(&issue_key);
-        let attempt = prior
-            .as_ref()
-            .map(|s| s.attempts.saturating_add(1))
-            .unwrap_or(1);
+        let mut prompt_prior = prior.clone();
+        let existing_thread = if event.is_pr {
+            let thread_id = linked_pr.as_ref().and_then(|pr| pr.thread_id.clone());
+            if linked_pr.is_none() {
+                tracing::warn!(
+                    repo = %event.repo,
+                    number = event.number,
+                    "PR comment has no persisted issue/thread relationship; starting a separate thread"
+                );
+            }
+            if let Some(thread_id) = thread_id.as_ref() {
+                prompt_prior
+                    .get_or_insert_with(crate::state::IssueState::default)
+                    .thread_id = Some(thread_id.clone());
+            }
+            thread_id
+        } else {
+            prior.as_ref().and_then(|state| state.thread_id.clone())
+        };
+        let attempt = prior.as_ref().map_or(1, |s| s.attempts.saturating_add(1));
         let exec = Some(
             crate::execution::create_execution(
                 &issue_key,
                 &event.repo,
-                event.number as i64,
+                issue_number as i64,
                 attempt,
                 Some(&format!("github:{}", event.author)),
                 Some("local"),
@@ -48,22 +75,48 @@ impl Dispatcher for AgentDispatcher {
             "url": event.url,
             "labels": [],
         });
-        let prompt = build_mention_prompt(event, instruction, &issue, prior.as_ref());
+        let mut prompt = build_mention_prompt(event, instruction, &issue, prompt_prior.as_ref());
+        if event.is_pr {
+            prompt.push_str(&format!(
+                "\nYou are commenting on existing PR {}. Continue on this PR's branch and do not create another PR. If a linked issue is available, update its state, but keep the PR as the review target.\n",
+                event.url
+            ));
+        }
         let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
             issue: &issue,
             project: &project,
             config: &self.config,
             prompt: Some(&prompt),
-            existing_thread: prior.as_ref().and_then(|s| s.thread_id.as_deref()),
+            existing_thread: existing_thread.as_deref(),
             attempt,
             execution_id: exec_id,
         });
         match launch {
             Ok(thread) => {
-                let pr_url = prior
-                    .as_ref()
-                    .and_then(|s| s.pr_url.clone())
-                    .or_else(|| discover_pr_url(&event.repo, event.number));
+                let pr_url = if event.is_pr {
+                    Some(event.url.clone())
+                } else {
+                    prior
+                        .as_ref()
+                        .and_then(|s| s.pr_url.clone())
+                        .or_else(|| discover_pr_url(&event.repo, issue_number))
+                        .filter(|url| url != &event.url)
+                };
+                let pr_number = event.is_pr.then_some(event.number).or_else(|| {
+                    pr_url
+                        .as_deref()
+                        .and_then(|url| url.rsplit('/').next()?.parse::<u64>().ok())
+                });
+                if event.is_pr
+                    && let Some(number) = pr_number
+                {
+                    let _ = crate::state::link_pull_request(
+                        &issue_key,
+                        number,
+                        &event.url,
+                        Some(&thread),
+                    );
+                }
                 if let Some(id) = exec_id {
                     let _ =
                         crate::execution::complete_execution(id, Some(&thread), pr_url.as_deref());
@@ -183,7 +236,14 @@ pub fn build_mention_prompt(
     let mut base = if same_thread {
         format!(
             "Follow-up on GitHub issue #{} ({}).\nThis is the same issue thread; keep prior context and continue from existing work.\n",
-            event.number, event.url
+            issue
+                .get("number")
+                .and_then(Value::as_u64)
+                .unwrap_or(event.number),
+            issue
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or(&event.url)
         )
     } else {
         crate::agent::build_prompt(issue)

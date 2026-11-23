@@ -25,6 +25,7 @@ pub fn issue_event(repo: &str, value: &Value) -> Option<TriggerEvent> {
         kind: EventKind::Issue,
         id,
         number,
+        linked_issue_number: None,
         title: text(value, "title"),
         body: text(value, "body"),
         url: url_of(value),
@@ -94,17 +95,20 @@ pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> 
                 .to_string();
             let id = comment.get("id").and_then(id_string)?;
             let (author, author_is_bot) = author_of(comment.get("user"));
+            let is_pr = issue.get("pull_request").is_some();
+            let pr_url = is_pr.then(|| format!("https://github.com/{repo}/pull/{number}"));
             Some(TriggerEvent {
                 repo,
                 kind: EventKind::Comment,
                 id,
                 number,
+                linked_issue_number: None,
                 title: text(issue, "title"),
                 body: text(comment, "body"),
-                url: url_of(comment),
+                url: pr_url.unwrap_or_else(|| url_of(comment)),
                 author,
                 author_is_bot,
-                is_pr: issue.get("pull_request").is_some(),
+                is_pr,
                 updated_at,
             })
         }
@@ -126,6 +130,7 @@ pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> 
                 kind: EventKind::Issue,
                 id,
                 number,
+                linked_issue_number: None,
                 title: text(pr, "title"),
                 body: text(pr, "body"),
                 url: url_of(pr),
@@ -145,14 +150,16 @@ pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> 
                 .to_string();
             let id = comment.get("id").and_then(id_string)?;
             let (author, author_is_bot) = author_of(comment.get("user"));
+            let pr_url = format!("https://github.com/{repo}/pull/{number}");
             Some(TriggerEvent {
                 repo,
                 kind: EventKind::Comment,
                 id,
                 number,
+                linked_issue_number: None,
                 title: text(pr, "title"),
                 body: text(comment, "body"),
-                url: url_of(comment),
+                url: pr_url,
                 author,
                 author_is_bot,
                 is_pr: true,
@@ -160,6 +167,35 @@ pub fn event_from_webhook(event: &str, payload: &Value) -> Option<TriggerEvent> 
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod webhook_tests {
+    use super::super::*;
+
+    #[test]
+    fn pr_comment_event_keeps_pr_and_closing_issue_numbers_separate() {
+        let payload = serde_json::json!({
+            "repository": {"full_name": "org/repo"},
+            "issue": {
+                "number": 38,
+                "title": "Follow-up PR",
+                "updated_at": "2026-11-23T00:00:00Z",
+                "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/38"},
+            },
+            "comment": {
+                "id": 123,
+                "body": "@alice factory fix it",
+                "updated_at": "2026-11-23T00:00:00Z",
+                "user": {"login": "alice"},
+            },
+        });
+        let event = event_from_webhook("issue_comment", &payload).unwrap();
+        assert!(event.is_pr);
+        assert_eq!(event.number, 38);
+        assert_eq!(event.url, "https://github.com/org/repo/pull/38");
+        assert_eq!(event.linked_issue_number, None);
     }
 }
 

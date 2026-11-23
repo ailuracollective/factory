@@ -32,6 +32,7 @@ fn event(id: &str, body: &str, updated_at: &str) -> TriggerEvent {
         kind: EventKind::Comment,
         id: id.to_string(),
         number: 5,
+        linked_issue_number: None,
         title: "Issue".to_string(),
         body: body.to_string(),
         url: "https://github.com/org/factory/issues/5".to_string(),
