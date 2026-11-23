@@ -3,6 +3,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20240101_000001_initial;
 mod m20240101_000002_policies;
 mod m20240101_000003_runner_tokens;
+mod m20240101_000004_runner_callback;
 
 pub struct Migrator;
 
@@ -13,6 +14,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240101_000001_initial::Migration),
             Box::new(m20240101_000002_policies::Migration),
             Box::new(m20240101_000003_runner_tokens::Migration),
+            Box::new(m20240101_000004_runner_callback::Migration),
         ]
     }
 }

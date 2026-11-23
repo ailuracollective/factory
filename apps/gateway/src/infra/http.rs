@@ -85,3 +85,57 @@ pub async fn github_permission(
         Err(_) => crate::domain::github::PermissionCheck::Unavailable,
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+pub async fn http_post_json(url: &str, token: &str, body: &str) -> Result<(u16, String)> {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    let fetch_val = js_sys::Reflect::get(&global, &js_sys::JsString::from("fetch"))
+        .map_err(|_| worker::Error::RustError("no fetch".into()))?;
+    let fetch_fn: js_sys::Function = fetch_val
+        .dyn_into()
+        .map_err(|_| worker::Error::RustError("fetch not fn".into()))?;
+    let init = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &init,
+        &js_sys::JsString::from("method"),
+        &js_sys::JsString::from("POST"),
+    );
+    let headers = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &headers,
+        &js_sys::JsString::from("Content-Type"),
+        &js_sys::JsString::from("application/json"),
+    );
+    let _ = js_sys::Reflect::set(
+        &headers,
+        &js_sys::JsString::from("x-factory-dispatch-secret"),
+        &js_sys::JsString::from(token),
+    );
+    let _ = js_sys::Reflect::set(&init, &js_sys::JsString::from("headers"), &headers);
+    let _ = js_sys::Reflect::set(
+        &init,
+        &js_sys::JsString::from("body"),
+        &js_sys::JsString::from(body),
+    );
+    let promise = fetch_fn
+        .call2(&global, &js_sys::JsString::from(url), &init)
+        .map_err(|_| worker::Error::RustError("fetch call failed".into()))?;
+    let promise: js_sys::Promise = promise
+        .dyn_into()
+        .map_err(|_| worker::Error::RustError("not promise".into()))?;
+    let resp_val = wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|_| worker::Error::RustError("fetch await failed".into()))?;
+    let resp: web_sys::Response = resp_val
+        .dyn_into()
+        .map_err(|_| worker::Error::RustError("not response".into()))?;
+    let status = resp.status();
+    let text_promise = resp
+        .text()
+        .map_err(|_| worker::Error::RustError("no text".into()))?;
+    let text_val = wasm_bindgen_futures::JsFuture::from(text_promise)
+        .await
+        .map_err(|_| worker::Error::RustError("text await failed".into()))?;
+    Ok((status, text_val.as_string().unwrap_or_default()))
+}

@@ -22,7 +22,6 @@ async fn my_worker() -> Ohkami {
         "/health".GET(health),
         "/webhooks/github".POST(services::webhook::handle_webhook),
         "/runners/register".POST(services::runner::handle_register),
-        "/jobs/claim".POST(services::runner::handle_claim),
         "/jobs/:id/heartbeat".POST(services::runner::handle_heartbeat),
         "/jobs/:id/complete".POST(services::runner::handle_complete),
         "/jobs/:id/fail".POST(services::runner::handle_fail),

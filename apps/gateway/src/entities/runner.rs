@@ -9,6 +9,8 @@ pub struct Model {
     pub created_at: i64,
     pub rotated_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    pub callback_url: Option<String>,
+    pub callback_secret: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

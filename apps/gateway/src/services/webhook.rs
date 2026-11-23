@@ -257,5 +257,9 @@ pub async fn handle_webhook(req: &Request, env: &worker::Env) -> ohkami::Respons
     }
 
     infra::audit(&conn, "webhook_accepted", &id).await;
-    json_response(&serde_json::json!({"status": "accepted", "job": id}), 202)
+    let dispatched = crate::services::runner::dispatch_job(&conn, &id).await;
+    json_response(
+        &serde_json::json!({"status": "accepted", "job": id, "dispatched": dispatched}),
+        202,
+    )
 }
