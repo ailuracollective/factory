@@ -182,16 +182,7 @@ pub fn remove_repo(name: &str) -> bool {
     if let Some(hook_id) = repo.hook_id
         && !repo.github.is_empty()
     {
-        run(
-            &[
-                "gh",
-                "api",
-                &format!("repos/{}/hooks/{}", repo.github, hook_id),
-                "-X",
-                "DELETE",
-            ],
-            None,
-        );
+        let _ = crate::webhook_manager::delete_webhook(&repo.github, hook_id);
     }
     config.repos.retain(|r| r.name != name && r.github != name);
     save_config(&config).ok();

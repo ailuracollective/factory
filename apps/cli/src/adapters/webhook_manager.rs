@@ -1,4 +1,3 @@
-use crate::config::{get_repo, get_repo_mut, load_config, save_config};
 use anyhow::Result;
 use std::process::Command;
 
@@ -77,7 +76,6 @@ pub fn update_webhook(repo_slug: &str, hook_id: u64, url: &str, secret: &str) ->
     Ok(code == 0)
 }
 
-#[allow(dead_code)]
 pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
     let path = format!("repos/{}/hooks/{}", repo_slug, hook_id);
     let (code, _) = run(&[
@@ -88,33 +86,4 @@ pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
         "DELETE".to_string(),
     ]);
     Ok(code == 0)
-}
-
-#[allow(dead_code)]
-pub fn sync_webhook(name: &str) -> Result<bool> {
-    let mut config = load_config()?;
-    let repo = match get_repo(&config, name) {
-        Some(r) => r.clone(),
-        None => return Ok(false),
-    };
-    let github = repo.github.clone();
-    let url = config.webhook.funnel_url.clone();
-    let secret = config.webhook.secret.clone();
-    if github.is_empty() || url.is_empty() || secret.is_empty() {
-        return Ok(false);
-    }
-    let hook_id = repo.hook_id;
-    if let Some(hid) = hook_id {
-        update_webhook(&github, hid, &url, &secret)
-    } else {
-        if let Some(new_id) = create_webhook(&github, &url, &secret)? {
-            if let Some(r) = get_repo_mut(&mut config, name) {
-                r.hook_id = Some(new_id);
-            }
-            save_config(&config)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
 }

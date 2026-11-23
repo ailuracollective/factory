@@ -29,7 +29,8 @@ Run `factory --help` for the full command list. Common commands:
 - `factory repo add <repo>` / `factory repo list` / `factory repo remove <name>` — manage repositories
 - `factory start` / `factory stop` / `factory restart` / `factory status` — daemon lifecycle
 - `factory listen [--port N]` — run webhook listener in the foreground
-- `factory mentions [--once] [--interval N]` — poll GitHub for configured mentions
+- `factory runner` — run as a connected runner (receives job pushes)
+- `factory listen` — run webhook listener (processes GitHub events and runner jobs)
 - `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
 - `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
 
