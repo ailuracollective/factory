@@ -10,3 +10,8 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "MIT"
+
+[patch.crates-io]
+sea-orm = { git = "https://github.com/SeaQL/sea-orm", rev = "693cd0e1e11a3d46afa208e73ae6f837aab49367" }
+sea-orm-migration = { git = "https://github.com/SeaQL/sea-orm", rev = "693cd0e1e11a3d46afa208e73ae6f837aab49367" }
+sea-orm-macros = { git = "https://github.com/SeaQL/sea-orm", rev = "693cd0e1e11a3d46afa208e73ae6f837aab49367" }

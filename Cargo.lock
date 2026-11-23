@@ -2537,8 +2537,7 @@ dependencies = [
 [[package]]
 name = "sea-orm"
 version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40bc08e0aa1963295a30473f98d9b4c9c2b0b3a028381e0143cb2647d0a59a32"
+source = "git+https://github.com/SeaQL/sea-orm?rev=693cd0e1e11a3d46afa208e73ae6f837aab49367#693cd0e1e11a3d46afa208e73ae6f837aab49367"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2574,8 +2573,7 @@ dependencies = [
 [[package]]
 name = "sea-orm-arrow"
 version = "2.0.0-rc.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2edbdc3c8e00e855d7911b6c6c4048f61c28eba40a1d40456f363d7b4969a4"
+source = "git+https://github.com/SeaQL/sea-orm?rev=693cd0e1e11a3d46afa208e73ae6f837aab49367#693cd0e1e11a3d46afa208e73ae6f837aab49367"
 dependencies = [
  "arrow",
  "sea-query",
@@ -2585,8 +2583,7 @@ dependencies = [
 [[package]]
 name = "sea-orm-macros"
 version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91fa8c81c20fc8cfe78d22d9a2721ca5ef151dc4a8a7b372de218aaba33733fa"
+source = "git+https://github.com/SeaQL/sea-orm?rev=693cd0e1e11a3d46afa208e73ae6f837aab49367#693cd0e1e11a3d46afa208e73ae6f837aab49367"
 dependencies = [
  "heck 0.5.0",
  "itertools",
@@ -2601,8 +2598,7 @@ dependencies = [
 [[package]]
 name = "sea-orm-migration"
 version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07970137dbbed6daf56a2429db349abfb68ed1c79206957c30d4a0e9ea808c08"
+source = "git+https://github.com/SeaQL/sea-orm?rev=693cd0e1e11a3d46afa208e73ae6f837aab49367#693cd0e1e11a3d46afa208e73ae6f837aab49367"
 dependencies = [
  "async-trait",
  "sea-orm",
