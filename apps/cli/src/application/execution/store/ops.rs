@@ -101,6 +101,37 @@ pub fn list_executions(limit: u64) -> Result<Vec<ExecutionRecord>> {
     })
 }
 
+pub fn list_executions_filtered(
+    repo: Option<&str>,
+    status: Option<&str>,
+    issue: Option<i64>,
+    limit: u64,
+) -> Result<Vec<ExecutionRecord>> {
+    let path = db_path();
+    let repo = repo.map(|s| s.to_string());
+    let status = status.map(|s| s.to_string());
+    run_async(async move {
+        let db = connect(&path).await?;
+        let mut q = ExecutionEntity::find();
+        if let Some(r) = &repo {
+            q = q.filter(ExecutionColumn::Repo.eq(r.clone()));
+        }
+        if let Some(s) = &status {
+            q = q.filter(ExecutionColumn::Status.eq(s.clone()));
+        }
+        if let Some(i) = issue {
+            q = q.filter(ExecutionColumn::IssueNumber.eq(i));
+        }
+        let rows = q
+            .order_by_desc(ExecutionColumn::StartedAt)
+            .order_by_desc(ExecutionColumn::ExecutionId)
+            .limit(limit)
+            .all(&db)
+            .await?;
+        Ok(rows.into_iter().map(ExecutionRecord::from_model).collect())
+    })
+}
+
 pub fn list_cancellable_for_issue(repo: &str, issue_number: i64) -> Result<Vec<ExecutionRecord>> {
     let path = db_path();
     let repo = repo.to_string();
