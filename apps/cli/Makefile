@@ -1,25 +1,24 @@
-.PHONY: lint format format-check test dev start build clean
+.PHONY: build install test fmt clippy
 
-lint:
-	cargo clippy -- -D warnings
-
-format:
-	cargo fmt
-
-format-check:
-	cargo fmt --check
-
-test:
-	cargo test
-
-dev:
-	cargo run
-
-start:
-	cargo run --release
+ROOT := $(abspath ../..)
 
 build:
-	cargo build --release
+	cd $(ROOT) && cargo build -p cli --release
 
-clean:
-	cargo clean
+install: build
+	mkdir -p ~/.local/bin
+	-~/.local/bin/factory stop 2>/dev/null || true
+	cp $(ROOT)/target/release/factory ~/.local/bin/factory
+	cp $(ROOT)/target/release/afc ~/.local/bin/afc 2>/dev/null || true
+	cp $(ROOT)/target/release/factory ~/.cargo/bin/factory 2>/dev/null || true
+	cp $(ROOT)/target/release/afc ~/.cargo/bin/afc 2>/dev/null || true
+	chmod +x ~/.local/bin/factory ~/.local/bin/afc ~/.cargo/bin/factory ~/.cargo/bin/afc 2>/dev/null || true
+
+test:
+	cd $(ROOT) && cargo test -p cli
+
+fmt:
+	cd $(ROOT) && cargo fmt --all
+
+clippy:
+	cd $(ROOT) && cargo clippy -p cli -- -D warnings
