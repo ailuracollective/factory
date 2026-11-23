@@ -218,6 +218,13 @@ enum DaemonAction {
         #[arg(long)]
         verbose: bool,
     },
+    /// Drain the daemon (stop accepting new work)
+    Drain {
+        #[arg(long, default_value = "300")]
+        timeout: u64,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show daemon logs
     Logs {
         #[arg(short, long)]
@@ -255,6 +262,7 @@ fn main() -> ExitCode {
             DaemonAction::Restart => cli::restart(),
             DaemonAction::Resume { json } => cli::resume(json),
             DaemonAction::Status { json, verbose } => cli::status(json, verbose),
+            DaemonAction::Drain { timeout, json } => cli::drain(timeout, json),
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
             DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),
         },

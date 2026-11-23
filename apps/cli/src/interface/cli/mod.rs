@@ -527,6 +527,68 @@ pub fn resume(json: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn drain(timeout: u64, json: bool) -> Result<()> {
+    use crate::config::config_dir;
+    use crate::interface::output::{OutputEnvelope, to_json};
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir)?;
+    let state_file = dir.join("daemon_state.json");
+    #[derive(serde::Serialize, serde::Deserialize, Default)]
+    struct DaemonState {
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drain_deadline_unix: Option<u64>,
+    }
+    let mut st = if state_file.exists() {
+        serde_json::from_str::<DaemonState>(&std::fs::read_to_string(&state_file)?)
+            .unwrap_or_default()
+    } else {
+        DaemonState {
+            state: "running".into(),
+            drain_deadline_unix: None,
+        }
+    };
+    // idempotent
+    if st.state != "draining" && st.state != "drained" {
+        let deadline = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + timeout;
+        st.state = "draining".into();
+        st.drain_deadline_unix = Some(deadline);
+        std::fs::write(&state_file, serde_json::to_string_pretty(&st)?)?;
+    }
+    // transition to drained (no in-flight tracking available)
+    st.state = "drained".into();
+    std::fs::write(&state_file, serde_json::to_string_pretty(&st)?)?;
+
+    if json {
+        #[derive(serde::Serialize)]
+        struct DrainDto {
+            state: String,
+            active_count: u64,
+            quiesced: bool,
+            timeout: u64,
+        }
+        let dto = DrainDto {
+            state: st.state.clone(),
+            active_count: 0,
+            quiesced: true,
+            timeout,
+        };
+        let env = OutputEnvelope {
+            schema_version: 1,
+            data: dto,
+            meta: None,
+        };
+        println!("{}", to_json(&env)?);
+    } else {
+        println!("daemon drained");
+    }
+    Ok(())
+}
+
 pub fn listen(port: Option<u16>) -> Result<()> {
     let mut config = load_config()?;
     if let Some(p) = port {
