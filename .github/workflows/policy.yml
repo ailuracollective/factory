@@ -1,0 +1,58 @@
+---
+name: Contribution policy
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+  issues:
+    types: [opened]
+permissions: {}
+
+concurrency:
+  group: policy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  pull-request-policy:
+    name: Pull request policy
+    # Same exemption: the checks cannot be satisfied by a generated changelog.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.draft == false &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--branches--')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The checker is read-only; status comments are disabled until the target
+      # has approved credentials and an appropriate comment identity.
+      pull-requests: read
+      contents: read
+    steps:
+      - uses: ailuracollective/actions/pull-request@v2
+        with:
+          type-labels: type/feature,type/bug,type/documentation,type/improvement,type/task
+          # Also the filenames of the body-structure templates.
+          title-types: feat,fix,chore,docs,style,refactor,perf,test,build,ci,revert,breaking-change
+          title-min: 15
+          title-max: 72
+          approved-label: status/ready
+          # The default form lives inside this directory rather than beside it.
+          template-dir: .github/PULL_REQUEST_TEMPLATE
+          default-template: .github/PULL_REQUEST_TEMPLATE/PULL_REQUEST_TEMPLATE.md
+          skip-actors: ''
+          enable-status-comment: false
+
+  triage:
+    name: Issue triage
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: ailuracollective/actions/triage@v2
+        with:
+          # Applies to issues opened without a form as well as template submissions.
+          auto-label-name: status/needs-review

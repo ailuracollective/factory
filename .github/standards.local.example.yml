@@ -1,0 +1,65 @@
+---
+# `.github/standards.local.yml` — the opt-in customization record.
+#
+# It declares deviations; it configures nothing. No workflow reads it, so a value here
+# changes no behaviour. To change the gate, edit that repository's own `policy.yml`.
+#
+# `reason` is required on every override, drop and structural entry. Level 3 also needs
+# `issue:`. Reserved families: type/, status/, scope/, meta/, github_actions, release/.
+# `type/` is frozen at five members. Policy: docs/customization.md.
+#
+# Keep only the sections you use:
+#
+#   extensions        level 1  a label in a family the core does not use
+#   label-overrides   level 2  a core label's color or description
+#   input-overrides   level 2  a gate input's value
+#   drops             level 3  removing a core label
+#   structural        level 3  a gate input's set, or the manifest's shape
+
+# An explicit empty mapping: a comments-only file parses to None, like a truncated one.
+
+# Informational only.
+# extends: "2026-01"
+
+# --- Level 1 ---
+# Same three keys as the manifest; the color is a quoted six-digit string.
+#
+# extensions:
+#   - name: "area/auth"
+#     color: "1D76DB"
+#     description: "Authentication, sessions, and permissions."
+
+# --- Level 2 ---
+# `field` is `color` or `description`; `value` is the literal string, so numbers stay quoted.
+#
+# label-overrides:
+#   - name: "type/bug"
+#     field: "color"
+#     value: "B60205"
+#     reason: "Red is reserved for security; a bug is not a security incident."
+#
+# input-overrides:
+#   - input: "title-min"
+#     value: "30"
+#     reason: "Our commit subjects are descriptive enough that 15 rejects real work."
+
+# --- Level 3 ---
+# `issue` is the ailuracollective/standards issue that approved the deviation.
+#
+# drops:
+#   - name: "scope/security"
+#     reason: "Internal-only service with no exposed attack surface."
+#
+# `kind: input` changes a gate input's set; `kind: manifest` is a labels.yml shaped
+# differently from the core's.
+#
+# structural:
+#   - kind: "input"
+#     input: "title-types"
+#     value: "feat,fix,chore,docs,refactor,test,build,ci,perf,revert,style,breaking-change"
+#     reason: "We do not use release automation, so release PRs are not typed."
+#     issue: 13
+#   - kind: "manifest"
+#     manifest: "nested"
+#     reason: "Our labels.yml nests under a `labels:` key; the header and the reconciliation recipe are ours."
+#     issue: 13

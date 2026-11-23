@@ -1,0 +1,320 @@
+---
+# Canonical issue and PR contract for ailuracollective repositories.
+#
+# This file is the source of truth. Templates are validated against it by CI.
+# Architecture: CONTRACT.yml → issue/PR templates → policy/validation → GitHub
+# workflow
+#
+# The contract defines what information is required for each type of work,
+# separating repository policy (in guidance/automation) from task definition
+# (in issues) and implementation evidence (in PRs).
+
+issue:
+  # Sections common to all issue types, in order.
+  # An issue is the task contract: why the work exists, what outcome is
+  # required, and how completion will be objectively recognized.
+  common:
+    - id: context
+      label: Context
+      description: >-
+        Why the work exists. Include evidence or current behavior when it
+        materially affects the task.
+      required: true
+
+    - id: goal
+      label: Goal
+      description: The observable outcome required.
+      required: true
+
+    - id: scope
+      label: Scope
+      description: What this issue includes.
+      required: true
+
+    - id: acceptance-criteria
+      label: Acceptance criteria
+      description: >-
+        Observable conditions that establish completion. Describe outcomes,
+        not implementation steps.
+      required: true
+
+    - id: non-goals
+      label: Non-goals
+      description: >-
+        Only include when an explicit boundary prevents ambiguity. Omit when
+        not needed.
+      required: false
+
+    - id: constraints
+      label: Constraints
+      description: Only constraints that materially limit valid solutions.
+      required: false
+
+    - id: references
+      label: References
+      description: >-
+        Links or paths to authoritative context. A path is a navigation hint
+        unless the issue explicitly states that modifying that file is
+        required.
+      required: false
+
+  # Type-specific deltas. Each type adds only sections that cannot be
+  # represented by the common contract.
+  types:
+    bug:
+      title_prefix: "fix: "
+      label: type/bug
+      description: Correct behavior that does not match the expected behavior.
+      extra:
+        - id: observed-behavior
+          label: Observed behavior
+          description: What currently happens.
+          required: true
+        - id: expected-behavior
+          label: Expected behavior
+          description: What should happen instead.
+          required: true
+        - id: reproduction
+          label: Reproduction
+          description: The smallest reliable reproduction.
+          required: false
+
+    feature:
+      title_prefix: "feat: "
+      label: type/feature
+      description: Add a new capability or behavior.
+      extra: []
+
+    improvement:
+      title_prefix: "improvement: "
+      label: type/improvement
+      description: Improve existing behavior without correcting a bug.
+      extra: []
+
+    chore:
+      title_prefix: "chore: "
+      label: type/task
+      description: Technical maintenance with no intended functional change.
+      extra: []
+
+    test:
+      title_prefix: "test: "
+      label: type/task
+      description: Add or improve automated test coverage.
+      extra: []
+
+    docs:
+      title_prefix: "docs: "
+      label: type/documentation
+      description: Add or update project documentation.
+      extra: []
+
+    spike:
+      title_prefix: "spike: "
+      label: type/task
+      description: Investigate a question or uncertainty before implementation.
+      extra:
+        - id: question
+          label: Question
+          description: What needs to be answered.
+          required: true
+        - id: deliverable
+          label: Deliverable
+          description: >-
+            What the investigation should produce (findings, recommendation,
+            decision).
+          required: true
+
+pr:
+  # Sections common to all PR types, in order.
+  # A PR is implementation evidence: what changed, why, and how the result
+  # was verified against the issue's acceptance criteria.
+  common:
+    - id: linked-issue
+      label: Linked issue
+      description: A direct reference to the governing issue.
+      required: true
+
+    - id: summary
+      label: Summary
+      description: What changed and why, in concise terms.
+      required: true
+
+    - id: changes
+      label: Changes
+      description: >-
+        The relevant implementation changes. Implementation-oriented; the
+        issue defines the desired outcome.
+      required: true
+
+    - id: verification
+      label: Verification
+      description: Concrete evidence that the acceptance criteria are satisfied.
+      required: true
+
+    - id: risk-compatibility
+      label: Risk / compatibility
+      description: >-
+        Only when there is material risk, compatibility impact, or behavior
+        that reviewers need to know.
+      required: false
+
+    - id: migration
+      label: Migration
+      description: Only when migration is required.
+      required: false
+
+  # Type-specific deltas. Only types with materially different information
+  # needs have their own template.
+  types:
+    breaking-change:
+      extra:
+        - id: what-breaks
+          label: What breaks and for whom
+          description: >-
+            The API, option, or behavior that changes, and who is affected.
+          required: true
+        - id: before-after
+          label: Before / after
+          description: The old and new contract side by side.
+          required: true
+        - id: migration-steps
+          label: Migration steps
+          description: Exact steps a consumer takes to migrate.
+          required: true
+        - id: deprecation-plan
+          label: Deprecation plan
+          description: Timeline and removal version, or "removed outright".
+          required: true
+        - id: affected-versions
+          label: Affected version range
+          description: >-
+            Which versions carry the old behavior, and which release removes
+            it.
+          required: true
+
+    perf:
+      extra:
+        - id: measurements
+          label: Measurements
+          description: >-
+            Before and after, with units. Paste the benchmark output.
+          required: true
+        - id: regression-threshold
+          label: Regression threshold
+          description: What CI should assert, and what the budget is.
+          required: true
+        - id: environment
+          label: Environment
+          description: >-
+            Hardware, OS, runtime version, and anything else affecting the
+            number.
+          required: true
+
+    ci:
+      extra:
+        - id: permissions
+          label: Permissions and secrets
+          description: >-
+            The permissions and secrets this grants, and the blast radius.
+          required: true
+        - id: failure-mode
+          label: Failure mode
+          description: What happens if this workflow is wrong or unavailable.
+          required: true
+
+    build:
+      extra:
+        - id: output-equivalence
+          label: Output equivalence
+          description: How you know the artifact is still correct, beyond "it built".
+          required: true
+        - id: packaging
+          label: Packaging and version changes
+          description: What now ships in the artifact and whether the version bumps.
+          required: true
+
+    # All other types use the common contract only.
+    feat:
+      extra: []
+    fix:
+      extra: []
+    docs:
+      extra: []
+    test:
+      extra: []
+    chore:
+      extra: []
+    refactor:
+      extra: []
+    revert:
+      extra: []
+    style:
+      extra: []
+
+# Taxonomy mappings: the relationship between the different vocabularies.
+# These are related but distinct concepts and must not be conflated.
+taxonomy:
+  # Issue types (7): feat, fix, improvement, chore, test, docs, spike
+  # PR title types (12): feat, fix, chore, docs, style, refactor, perf,
+  #   test, build, ci, revert, breaking-change
+  # Branch types (11): feat, fix, chore, docs, style, refactor, perf,
+  #   test, build, ci, revert
+  # Type labels (5): type/feature, type/bug, type/improvement, type/task,
+  #   type/documentation
+
+  issue_to_pr_title:
+    feature: feat
+    bug: fix
+    improvement: feat
+    chore: chore
+    test: test
+    docs: docs
+    spike:
+
+  pr_title_to_branch:
+    feat: feat
+    fix: fix
+    chore: chore
+    docs: docs
+    style: style
+    refactor: refactor
+    perf: perf
+    test: test
+    build: build
+    ci: ci
+    revert: revert
+    breaking-change:
+
+  pr_title_to_label:
+    feat: type/feature
+    fix: type/bug
+    chore: type/task
+    docs: type/documentation
+    style: type/task
+    refactor: type/task
+    perf: type/task
+    test: type/task
+    build: type/task
+    ci: type/task
+    revert: type/task
+    breaking-change:
+
+# AI-agent contract: rules for agents consuming issues and PRs.
+agent_contract:
+  rules:
+    - >-
+      Do not invent repository-specific facts. Inspect authoritative repository
+      instructions and referenced files before implementation.
+    - >-
+      If required information is still unavailable, state the uncertainty
+      instead of guessing.
+    - >-
+      A path listed under References is a navigation hint unless the issue
+      explicitly states that modifying that file is required.
+    - Do not infer that every referenced file must be changed.
+    - Do not infer that every omitted section has a value of "none".
+    - >-
+      Do not infer that an implementation approach is required merely because
+      it is mentioned as an example.
+    - Do not reconstruct missing repository facts from conventions.

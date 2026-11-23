@@ -1,6 +1,13 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+Guidance for contributors and coding agents working in Ailura Factory.
+
+## Organization standards
+
+The mandatory organization conventions are in
+[.agents/organization-conventions.md](.agents/organization-conventions.md).
+Read them before working; they govern issues, pull requests, labels, reviews,
+commits, and workflows.
 
 ## Project
 
@@ -19,16 +26,8 @@ Each app directory contains a `README.md` with app-specific setup and usage.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p cli -- -D warnings
-cargo build -p cli
-cargo test -p cli
-```
-
-Gateway (wasm32):
-
-```bash
-cargo clippy -p gateway --target wasm32-unknown-unknown -- -D warnings
-cargo build -p gateway --target wasm32-unknown-unknown --release
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
 ## Conventions
@@ -46,3 +45,19 @@ cargo build -p gateway --target wasm32-unknown-unknown --release
 - Gateway does not replace the local listener; keep both during transition.
 - Do not couple gateway to a specific AI provider.
 - See app READMEs (`apps/*/README.md`) for per-app details.
+
+## Repository-specific conventions
+
+- Do not configure automated release or deployment workflows without a separate
+  maintainer decision. Release and deployment are not part of standards adoption.
+
+## Pull requests
+
+- Use Conventional Commit titles and a matching
+  [.github/PULL_REQUEST_TEMPLATE/](.github/PULL_REQUEST_TEMPLATE/).
+- Branch names are not validated by the policy workflow.
+- Link and close a `status/ready` issue, and apply exactly one `type/*` label.
+- The `## Verification` section records evidence; CI commands are documented
+  here, not copied into the shared templates.
+- Policy status comments are disabled until maintainers approve a comment
+  identity and configure its credentials.

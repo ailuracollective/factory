@@ -1,0 +1,66 @@
+---
+name: Maintenance
+description: Technical maintenance with no intended functional change.
+title: "chore: "
+labels:
+  - type/task
+  - status/needs-review
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this work exists. Include evidence or current behavior when it materially affects the task.
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The observable outcome required.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What this issue includes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Intended maintenance changes are complete.
+        - [ ] Existing behavior remains unchanged.
+        - [ ] Relevant tests pass.
+        - [ ] No unnecessary changes outside the scope are introduced.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: Only include when an explicit boundary prevents ambiguity.
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      value: |
+        - No functional behavior changes unless explicitly stated.
+        - Preserve public APIs unless explicitly stated otherwise.
+        - Preserve security-sensitive behavior unless explicitly included.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: >-
+        Links or paths to authoritative context. A path is a navigation hint
+        unless the issue explicitly states that modifying that file is required.
