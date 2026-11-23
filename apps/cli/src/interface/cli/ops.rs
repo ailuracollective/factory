@@ -444,3 +444,219 @@ pub fn execution_list(
     }
     Ok(())
 }
+
+pub fn agent_run(
+    repo: &str,
+    issue: Option<u64>,
+    prompt: Option<&str>,
+    harness: Option<&str>,
+    model: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    // exactly one source
+    match (issue, prompt) {
+        (Some(_), Some(_)) => {
+            anyhow::bail!("--issue and --prompt are mutually exclusive");
+        }
+        (None, None) => {
+            anyhow::bail!("either --issue or --prompt is required");
+        }
+        _ => {}
+    }
+
+    let config = load_config()?;
+    let repo_entry = match get_repo(&config, repo) {
+        Some(r) => r.clone(),
+        None => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"error": format!("repo not found: {repo}")})
+                );
+            } else {
+                println!("Repo not found: {}", repo);
+            }
+            return Err(anyhow::anyhow!("repo not found: {repo}"));
+        }
+    };
+    let project = std::path::PathBuf::from(&repo_entry.path);
+    if !project.exists() {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"error": format!("project path not found: {}", project.display())})
+            );
+        } else {
+            println!("Project path not found: {}", project.display());
+        }
+        return Err(anyhow::anyhow!("project path not found"));
+    }
+
+    // apply overrides via env (no config mutation)
+    if let Some(h) = harness {
+        unsafe {
+            std::env::set_var("ISSUE_FACTORY_HARNESS", h);
+        }
+    }
+    if let Some(m) = model {
+        unsafe {
+            std::env::set_var("ISSUE_FACTORY_MODEL", m);
+        }
+    }
+
+    if let Some(issue_num) = issue {
+        // fetch issue
+        let (code, out) = run(&[
+            "gh",
+            "issue",
+            "view",
+            &issue_num.to_string(),
+            "--repo",
+            &repo_entry.github,
+            "--json",
+            "number,title,body,url,labels",
+        ]);
+        if code != 0 {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"error": format!("failed to fetch issue: {out}")})
+                );
+            } else {
+                println!("Failed to fetch issue: {}", out);
+            }
+            return Err(anyhow::anyhow!("failed to fetch issue"));
+        }
+        let issue_data: serde_json::Value = serde_json::from_str(&out)
+            .map_err(|_| anyhow::anyhow!("failed to parse issue JSON"))?;
+
+        let key = format!("{}#{}", repo_entry.github, issue_num);
+        let prior = crate::state::issue_state(&key);
+        let existing = prior.as_ref().and_then(|s| s.thread_id.clone());
+        let attempt = prior
+            .as_ref()
+            .map(|s| s.attempts.saturating_add(1))
+            .unwrap_or(1);
+        let exec = crate::execution::create_execution(
+            &key,
+            &repo_entry.github,
+            issue_num as i64,
+            attempt,
+            Some("cli"),
+            Some("local"),
+            Some("agent run"),
+        )?;
+        let exec_id = exec.execution_id.clone();
+        let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+            issue: &issue_data,
+            project: &project,
+            config: &config,
+            prompt: None,
+            existing_thread: existing.as_deref(),
+            attempt,
+            execution_id: Some(&exec_id),
+        });
+        match launch {
+            Ok(tid) => {
+                let pr_url = crate::mentions::discover_pr_url(&repo_entry.github, issue_num);
+                let _ =
+                    crate::execution::complete_execution(&exec_id, Some(&tid), pr_url.as_deref());
+                let _ = crate::state::update_issue_state(&key, |rec| {
+                    rec.status = crate::state::IssueStatus::Completed;
+                    rec.thread_id = Some(tid.clone());
+                    rec.last_error = None;
+                    if rec.pr_url.is_none() {
+                        rec.pr_url = pr_url.clone();
+                    }
+                });
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "execution_id": exec_id,
+                            "source": "issue",
+                            "status": "completed",
+                            "thread_id": tid,
+                            "pr_url": pr_url,
+                        })
+                    );
+                } else {
+                    println!("Execution: {}", exec_id);
+                    println!("Launched thread: {}", tid);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if !crate::execution::is_cancel_requested(&exec_id) {
+                    let _ = crate::execution::fail_execution(&exec_id, &e);
+                }
+                let _ = crate::state::update_issue_state(&key, |rec| {
+                    rec.status = crate::state::IssueStatus::Failed;
+                    rec.last_error = Some(e.clone());
+                });
+                if json {
+                    println!("{}", serde_json::json!({"error": e}));
+                } else {
+                    println!("Failed to launch agent: {e}");
+                }
+                Err(anyhow::anyhow!("{}", e))
+            }
+        }
+    } else {
+        let p = prompt.unwrap_or("");
+        let issue =
+            serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
+        let key = format!("{}#0", repo_entry.github);
+        let exec = crate::execution::create_execution(
+            &key,
+            &repo_entry.github,
+            0,
+            1,
+            Some("cli"),
+            Some("local"),
+            Some("custom prompt"),
+        )?;
+        let exec_id = exec.execution_id.clone();
+        let launch = crate::agent::launch_agent_with_execution(crate::agent::AgentLaunchRequest {
+            issue: &issue,
+            project: &project,
+            config: &config,
+            prompt: Some(p),
+            existing_thread: None,
+            attempt: 1,
+            execution_id: Some(&exec_id),
+        });
+        match launch {
+            Ok(tid) => {
+                let _ = crate::execution::complete_execution(&exec_id, Some(&tid), None);
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "execution_id": exec_id,
+                            "source": "prompt",
+                            "status": "completed",
+                            "thread_id": tid,
+                            "pr_url": null,
+                        })
+                    );
+                } else {
+                    println!("Execution: {}", exec_id);
+                    println!("Launched thread: {}", tid);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if !crate::execution::is_cancel_requested(&exec_id) {
+                    let _ = crate::execution::fail_execution(&exec_id, &e);
+                }
+                if json {
+                    println!("{}", serde_json::json!({"error": e}));
+                } else {
+                    println!("Failed to launch agent: {e}");
+                }
+                Err(anyhow::anyhow!("{}", e))
+            }
+        }
+    }
+}
