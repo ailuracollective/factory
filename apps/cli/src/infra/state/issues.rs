@@ -99,3 +99,10 @@ pub fn update_issue_state<F: FnOnce(&mut IssueState)>(key: &str, f: F) -> Result
     rec.updated_at = now();
     save_state(&issues)
 }
+
+pub fn issue_state_by_pr_url(pr_url: &str) -> Option<(String, IssueState)> {
+    let issues = load_state();
+    issues
+        .into_iter()
+        .find(|(_, rec)| rec.pr_url.as_deref() == Some(pr_url))
+}

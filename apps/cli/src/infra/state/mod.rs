@@ -264,7 +264,7 @@ mod issues;
 mod mentions_store;
 mod projects;
 
-pub use issues::{issue_state, load_state, save_state, update_issue_state};
+pub use issues::{issue_state, issue_state_by_pr_url, load_state, save_state, update_issue_state};
 pub use mentions_store::{count_mention_launches_since, mention_event_seen, record_mention_event};
 pub use projects::{load_projects, sync_projects};
 pub use pull_requests::{link_pull_request, linked_pull_requests, pull_request_for_event};

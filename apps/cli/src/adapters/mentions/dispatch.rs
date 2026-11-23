@@ -27,10 +27,15 @@ impl Dispatcher for AgentDispatcher {
             .is_pr
             .then(|| crate::state::pull_request_for_event(&event.repo, event.number))
             .flatten();
-        let issue_key = linked_pr.as_ref().map_or_else(
-            || format!("{}#{}", event.repo, event.number),
-            |pr| pr.issue_key.clone(),
-        );
+        let issue_key = if let Some(pr) = linked_pr.as_ref() {
+            pr.issue_key.clone()
+        } else if event.is_pr {
+            crate::state::issue_state_by_pr_url(&event.url)
+                .map(|(k, _)| k)
+                .unwrap_or_else(|| format!("{}#{}", event.repo, event.number))
+        } else {
+            format!("{}#{}", event.repo, event.number)
+        };
         let issue_number = issue_key
             .rsplit_once('#')
             .and_then(|(_, number)| number.parse::<u64>().ok())
@@ -38,8 +43,13 @@ impl Dispatcher for AgentDispatcher {
         let prior = crate::state::issue_state(&issue_key);
         let mut prompt_prior = prior.clone();
         let existing_thread = if event.is_pr {
-            let thread_id = linked_pr.as_ref().and_then(|pr| pr.thread_id.clone());
-            if linked_pr.is_none() {
+            let mut thread_id = linked_pr.as_ref().and_then(|pr| pr.thread_id.clone());
+            if thread_id.is_none()
+                && let Some((_, st)) = crate::state::issue_state_by_pr_url(&event.url)
+            {
+                thread_id = st.thread_id.clone();
+            }
+            if thread_id.is_none() {
                 tracing::warn!(
                     repo = %event.repo,
                     number = event.number,
