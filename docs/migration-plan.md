@@ -38,4 +38,4 @@
 ## Compatibility
 
 - Keep local listener and commands.
-- Config keys are additive with defaults, except `defaults.provider` was replaced by `defaults.harness` (the T3 Code provider instance). Old `provider` values are ignored; run `factory config set -g harness <harness>` once per machine.
+- Config keys are additive with defaults, except the agent selection key: it is now `defaults.harness` (harness installed in T3 Code). Files written before that rename need `factory config set -g harness <harness>` once per machine.

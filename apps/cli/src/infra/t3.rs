@@ -1,4 +1,4 @@
-//! T3 Code integration: harnesses (provider instances) and their models.
+//! T3 Code integration: installed harnesses and their models.
 //!
 //! T3 Code writes one capability cache per harness under `<T3CODE_HOME>/caches/`.
 //! Reading it keeps `factory` in sync with what T3 actually offers without
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct Harness {
-    /// Provider instance id accepted by `t3 thread start --provider`.
+    /// Harness id accepted by `t3 thread start`.
     pub name: String,
     pub driver: String,
     pub display_name: String,
@@ -110,7 +110,7 @@ mod tests {
             "models": [
                 {"slug": "opencode-go/beam-free"},
                 {"slug": "openai/gpt-6"},
-                {"slug": "default", "subProvider": "pi"}
+                {"slug": "default"}
             ]
         }"#;
         let h = parse_cache(cache).unwrap();

@@ -42,11 +42,11 @@ Configuration and state are stored under:
 
 - `~/.config/ailuracollective/factory/`
 
-`defaults.harness` is the **agent harness**, i.e. the T3 Code provider instance
+`defaults.harness` is the **agent harness** installed in T3 Code
 (`opencode`, `pi`, `codex`, `claudeAgent`, …). `defaults.model` is a model slug
-that belongs to that harness and is passed unchanged to T3, so it can name a
-model from any provider the harness exposes. Both are what the CLI hands to
-`t3 thread start` for the agent.
+that belongs to that harness and is passed unchanged to T3, so it can name any
+model the harness exposes. Both are what the CLI hands to `t3 thread start` for
+the agent.
 
 ```bash
 factory config set -g harness pi

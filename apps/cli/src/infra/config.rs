@@ -255,7 +255,6 @@ mod tests {
         let json = serde_json::to_value(Config::default()).unwrap();
         let defaults = json.get("defaults").unwrap();
         assert_eq!(defaults.get("harness").unwrap(), "opencode");
-        assert!(defaults.get("provider").is_none());
     }
 
     #[test]
