@@ -22,9 +22,13 @@ fn default_max_attempts() -> u32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Defaults {
+    #[serde(default)]
     pub provider: String,
+    #[serde(default)]
     pub model: String,
+    #[serde(default)]
     pub base_branch: String,
+    #[serde(default)]
     pub label: String,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u32,
