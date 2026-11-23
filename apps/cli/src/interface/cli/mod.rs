@@ -632,21 +632,22 @@ pub fn secret_rotate() -> Result<()> {
 
 pub fn logs(follow: bool, lines: u32) -> Result<()> {
     let n = lines.to_string();
-    let mut args = vec![
-        "journalctl",
-        "--user",
-        "-u",
-        "factory",
-        "--no-pager",
-        "-n",
-        n.as_str(),
-    ];
+    let mut args = vec!["--user", "-u", "factory", "--no-pager", "-n", n.as_str()];
     if follow {
-        args = vec!["journalctl", "--user", "-u", "factory", "-f"];
+        args.push("-f");
     }
-    let _ = std::process::Command::new("journalctl")
-        .args(&args[1..])
-        .status();
+    let status = std::process::Command::new("journalctl")
+        .args(&args)
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to spawn journalctl: {}", e))?;
+    // A non-zero exit that is not an interrupt (Ctrl-C) is a real failure.
+    if let Some(code) = status.code()
+        && code != 0
+        && code != 130
+        && code != 143
+    {
+        return Err(anyhow::anyhow!("journalctl exited with status {}", code));
+    }
     Ok(())
 }
 
