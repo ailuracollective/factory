@@ -445,6 +445,7 @@ pub fn config_get() -> Result<()> {
     println!("max_attempts: {}", cfg.defaults.max_attempts);
     println!("mentions.enabled: {}", cfg.mentions.enabled);
     println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
+    println!("mentions.usernames_extra: {}", cfg.mentions.usernames_extra.join(", "));
     println!("mentions.command: {}", cfg.mentions.command);
     println!("mentions.daily_quota: {}", cfg.mentions.daily_quota);
     println!("mentions.report: {}", cfg.mentions.report);
