@@ -351,3 +351,82 @@ pub use runner_cmd::runner;
 
 #[cfg(test)]
 mod tests;
+
+pub fn providers() -> Result<()> {
+    let (code, out) = run(&["opencode", "models"]);
+    if code != 0 {
+        println!("Failed to list models: {}", out);
+        return Ok(());
+    }
+    let mut providers: Vec<String> = out
+        .lines()
+        .filter_map(|l| l.split('/').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    providers.sort();
+    providers.dedup();
+    for p in providers {
+        println!("{}", p);
+    }
+    Ok(())
+}
+
+pub fn models(provider: Option<&str>) -> Result<()> {
+    let (code, out) = run(&["opencode", "models"]);
+    if code != 0 {
+        println!("Failed to list models: {}", out);
+        return Ok(());
+    }
+    for line in out.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(p) = provider
+            && !line.starts_with(&format!("{}/", p))
+        {
+            continue;
+        }
+        println!("{}", line);
+    }
+    Ok(())
+}
+
+pub fn config_get() -> Result<()> {
+    let cfg = load_config()?;
+    println!("provider: {}", cfg.defaults.provider);
+    println!("model:    {}", cfg.defaults.model);
+    Ok(())
+}
+
+pub fn config_set(key: &str, value: &str) -> Result<()> {
+    // validate against opencode models
+    let (code, out) = run(&["opencode", "models"]);
+    let models: Vec<&str> = if code == 0 { out.lines().map(str::trim).filter(|l| !l.is_empty()).collect() } else { Vec::new() };
+    let mut cfg = load_config()?;
+    match key {
+        "provider" => {
+            let valid = models.iter().any(|m| m.split('/').next() == Some(value));
+            if !valid {
+                println!("Unknown provider: {}. Available: {}", value, models.iter().map(|m| m.split('/').next().unwrap_or("")).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", "));
+                return Ok(());
+            }
+            cfg.defaults.provider = value.to_string();
+        }
+        "model" => {
+            if !models.contains(&value) {
+                println!("Unknown model: {}. Use 'factory models' to list.", value);
+                return Ok(());
+            }
+            cfg.defaults.model = value.to_string();
+        }
+        _ => {
+            println!("Unknown key: {}. Use 'provider' or 'model'.", key);
+            return Ok(());
+        }
+    }
+    save_config(&cfg)?;
+    println!("Set {} = {}", key, value);
+    Ok(())
+}

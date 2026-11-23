@@ -48,6 +48,15 @@ enum Commands {
     },
     /// Run diagnostics
     Doctor,
+    /// List providers
+    Providers,
+    /// List models (optionally by provider)
+    Models { provider: Option<String> },
+    /// Get/set default config
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// Run the webhook listener (foreground)
     Listen {
         #[arg(long)]
@@ -113,6 +122,14 @@ enum SecretAction {
     Rotate,
 }
 
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Get current defaults
+    Get,
+    /// Set a default value
+    Set { key: String, value: String },
+}
+
 fn main() -> ExitCode {
     use tracing_subscriber::EnvFilter;
     let filter =
@@ -156,6 +173,12 @@ fn main() -> ExitCode {
             prompt,
         } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
+        Commands::Providers => cli::providers(),
+        Commands::Models { provider } => cli::models(provider.as_deref()),
+        Commands::Config { action } => match action {
+            ConfigAction::Get => cli::config_get(),
+            ConfigAction::Set { key, value } => cli::config_set(&key, &value),
+        },
         Commands::Cancel {
             execution_id,
             repo,
