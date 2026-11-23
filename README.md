@@ -1,73 +1,42 @@
-# AI Factory
+# Ailura Factory
 
-A console application that listens to GitHub issues and launches [T3 Code](https://t3.codes) agents to resolve them.
-Written in Rust. Runs locally on your machine — no cloud hosting required.
+Ailura Factory exists to reduce the manual work around “issue becomes a coded change”: it connects GitHub activity to AI-assisted execution (agents) while keeping the workflow predictable for teams.
 
-## Build
+This repository is a **monorepo** so the moving parts stay versioned together: a local operator CLI, a cloud gateway for webhooks and job coordination, and notification adapters. Splitting them keeps responsibilities clear (run work locally vs. receive events reliably vs. fan out messages), while sharing contracts and docs in one place.
+
+## Apps
+
+| App | Why it exists | README |
+|---|---|---|
+| `apps/cli` | The day-to-day tool on a maintainer machine: configure repos, run the listener or mention polling, manage the daemon, and launch agent runs when you want local control. | [apps/cli/README.md](apps/cli/README.md) |
+| `apps/gateway` | A Cloudflare Worker edge entrypoint for GitHub webhooks and runner/job orchestration. It exists so events are received reliably without exposing your laptop, and so remote runners/jobs can be coordinated with durable state (D1). | [apps/gateway/README.md](apps/gateway/README.md) |
+| `apps/bot` | A small service that turns internal notifications into chat messages (for example Discord). It exists to decouple “something happened” from “how it is announced”, so notification delivery can evolve independently. | [apps/bot/README.md](apps/bot/README.md) |
+
+Other packages:
+
+- `internal/notifications` — shared notification types/contracts so producers and consumers agree on payloads.
+
+## Workspace commands
+
+From the repository root (Rust workspace):
 
 ```bash
-cargo build -p cli --release
-# binaries: target/release/factory, target/release/afc (shortcut)
-cp target/release/factory target/release/afc ~/.local/bin/
+cargo fmt --all -- --check
+cargo clippy -p cli -- -D warnings
+cargo build -p cli
+cargo test -p cli
 ```
 
-## Quick start
+Gateway (wasm32) checks/build:
 
 ```bash
-factory init                    # create config, generate secret
-factory doctor                  # verify dependencies
-factory repo add /path/to/repo  # register a repo
-tailscale funnel --bg 8787      # expose webhook
-factory start                   # start daemon
+cargo clippy -p gateway --target wasm32-unknown-unknown -- -D warnings
+cargo build -p gateway --target wasm32-unknown-unknown --release
 ```
 
-Then create a webhook in each repo (Settings → Webhooks) pointing to your funnel URL
-with the secret from `factory init`.
+## Documentation
 
-## Commands
-
-| Command | Description |
-|---|---|
-| `factory init [--force]` | Initialize factory config |
-| `factory repo add <path>` | Register an existing repo (labels, T3, webhook) |
-| `factory repo list` | List repos |
-| `factory repo remove <name>` | Unregister a repo |
-| `factory repo sync <name>` | Re-apply labels from standards |
-| `factory start` | Start daemon |
-| `factory stop` | Stop daemon |
-| `factory restart` | Restart daemon |
-| `factory status` | Show status |
-| `factory secret rotate` | Rotate webhook secret |
-| `factory logs [-f] [-n N]` | Show/follow daemon logs |
-| `factory doctor` | Run diagnostics |
-| `factory test <repo> <issue#> [--prompt "..."]` | Manually launch an agent for an issue (optional custom prompt) |
-| `factory run <repo> --prompt "..."` | Launch an agent with a custom prompt (no issue) |
-| `factory listen [--port N]` | Run webhook listener in foreground |
-| `factory mentions [--once] [--interval N]` | Poll GitHub for configured mentions and dispatch work |
-
-## How it works
-
-1. GitHub sends an `issues` webhook (opened / reopened / labeled).
-2. The factory verifies the HMAC signature and filters by `status/ready` (Ailura Collective standard).
-3. For each qualifying issue, it launches a T3 Code agent in an isolated git worktree/branch.
-4. The agent implements, tests, and opens a pull request (does not merge).
-
-Alternatively, mentions can be handled in real time via webhooks through
-`factory listen` (recommended when webhooks are configured) or by polling with
-`factory mentions` (no public endpoint needed). See
-[docs/mentions.md](docs/mentions.md).
-
-## Requirements
-
-- Rust toolchain (rustup)
-- `gh` CLI authenticated
-- T3 Code service running
-- Tailscale Funnel (or any public tunnel)
-
-## Configuration
-
-Config lives at `~/.config/ailuracollective/factory/config.json`. See `factory init`.
-Mention triggers are documented in [docs/mentions.md](docs/mentions.md).
+- `docs/` — architecture, audits, migration notes, roadmap, and feature docs (for example mentions flow).
 
 ## License
 
