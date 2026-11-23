@@ -9,12 +9,27 @@ Implemented as a Cloudflare Worker (Rust, WebAssembly) with D1, it receives GitH
 ## Requirements
 
 - Rust toolchain with the `wasm32-unknown-unknown` target
-- [`worker-build`](https://github.com/cloudflare/workers-rs) (`cargo install worker-build`)
-- [Wrangler](https://developers.cloudflare.com/workers/wrangler/) and Node.js (for local dev/deploy)
+- Node.js and pnpm
+
+## Commands
+
+Run these from `apps/gateway`:
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm install` | Install Wrangler and project dependencies |
+| `pnpm dev` | Start Wrangler's local server at `http://localhost:8787` |
+| `pnpm start` | Alias for `pnpm dev` |
+| `pnpm test` | Run Gateway Rust tests |
+| `pnpm lint` | Run Clippy for the WASM target |
+| `pnpm format` | Format Rust code |
+| `pnpm format:check` | Check Rust formatting without changing files |
+| `pnpm build` | Build the release WASM package |
+| `pnpm clean` | Clean Cargo build artifacts |
 
 ## Local development
 
-1. Create a local env file:
+1. (Optional) Create a local env file if you need local secrets:
 
    ```bash
    cp .dev.vars.example .dev.vars
@@ -24,16 +39,12 @@ Implemented as a Cloudflare Worker (Rust, WebAssembly) with D1, it receives GitH
 2. Start the dev server:
 
    ```bash
-   make dev
-   # or: npx wrangler dev
+   pnpm dev
    ```
 
-## Build and deploy
+   The Gateway is available at `http://localhost:8787`. Wrangler uses a local D1 simulation, isolated from the remote database.
 
-- Build (wasm release): `make build`
-- Deploy: `make deploy` (or `npx wrangler deploy`)
-
-D1 bindings and secrets are configured in `wrangler.toml` and the Cloudflare dashboard. See comments in `wrangler.toml` and `.dev.vars.example` for required variables.
+`.dev.vars` is ignored by Git; never commit secrets.
 
 ## More
 

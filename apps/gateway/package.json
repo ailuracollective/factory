@@ -1,0 +1,31 @@
+{
+  "description": "Ailura Factory Gateway (Cloudflare Worker)",
+  "files": [
+    "index_bg.wasm",
+    "index.js",
+    "index.d.ts"
+  ],
+  "license": "MIT",
+  "main": "index.js",
+  "name": "gateway",
+  "scripts": {
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "test": "cargo test",
+    "lint": "cargo clippy --target wasm32-unknown-unknown -- -D warnings",
+    "format": "cargo fmt",
+    "format:check": "cargo fmt --check",
+    "build": "cargo build --target wasm32-unknown-unknown --release",
+    "clean": "cargo clean",
+    "deploy:preview": "wrangler preview",
+    "deploy:prod": "wrangler deploy"
+  },
+  "sideEffects": [
+    "./index.js"
+  ],
+  "type": "module",
+  "version": "0.1.0",
+  "devDependencies": {
+    "wrangler": "^4.167.0"
+  }
+}

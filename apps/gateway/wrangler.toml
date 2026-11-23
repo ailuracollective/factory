@@ -8,7 +8,7 @@ command = "cargo install -q worker-build && worker-build --release"
 [[d1_databases]]
 binding = "DB"
 database_name = "ailura-factory"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "${D1_PRODUCTION_ID}"
 
 # Secrets are never committed. Set them with:
 #   wrangler secret put GITHUB_WEBHOOK_SECRET
@@ -19,3 +19,11 @@ database_id = "00000000-0000-0000-0000-000000000000"
 #   GITHUB_ALLOWED_REPOS = "owner/repo,owner/other"
 #   GITHUB_INSTALLATION_ID = "123456"
 # For local development, copy .dev.vars.example to .dev.vars.
+
+[previews.vars]
+ENVIRONMENT = "preview"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "ailura-factory-gateway-test"
+database_id = "d0099e20-c14f-48c2-a16b-e1e6978d8877"
