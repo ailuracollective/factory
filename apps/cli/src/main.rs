@@ -118,6 +118,7 @@ enum Commands {
         prompt: String,
     },
     /// Cancel a running or queued execution
+    #[command(hide = true)]
     Cancel {
         /// Execution ID (preferred)
         execution_id: Option<String>,
@@ -151,6 +152,21 @@ enum ExecutionAction {
         issue: Option<u64>,
         #[arg(long, default_value = "20")]
         limit: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel a running or queued execution
+    Cancel {
+        /// Execution ID (preferred)
+        execution_id: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        issue: Option<u64>,
+        #[arg(long)]
+        pr: Option<u64>,
+        #[arg(long)]
+        force: bool,
         #[arg(long)]
         json: bool,
     },
@@ -318,6 +334,21 @@ fn main() -> ExitCode {
                 limit,
                 json,
             } => cli::execution_list(status.as_deref(), repo.as_deref(), issue, limit, json),
+            ExecutionAction::Cancel {
+                execution_id,
+                repo,
+                issue,
+                pr,
+                force,
+                json,
+            } => cli::cancel(
+                execution_id.as_deref(),
+                repo.as_deref(),
+                issue,
+                pr,
+                force,
+                json,
+            ),
         },
     };
     match result {
