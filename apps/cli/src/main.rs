@@ -119,7 +119,10 @@ enum RepoAction {
     /// Add a repo (defaults to the current directory)
     Add { repo: Option<String> },
     /// List repos
-    List,
+    List {
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove a repo
     Remove { name: String },
     /// Sync labels for a repo
@@ -137,7 +140,10 @@ enum SecretAction {
 #[derive(Subcommand)]
 enum ConfigAction {
     /// Get current defaults
-    Get,
+    Get {
+        #[arg(long)]
+        json: bool,
+    },
     /// Set a default value
     Set {
         key: String,
@@ -160,7 +166,7 @@ fn main() -> ExitCode {
         Commands::Init { force, global } => cli::init(force, !global),
         Commands::Repo { action } => match action {
             RepoAction::Add { repo } => cli::repo_add(repo.as_deref().unwrap_or(".")),
-            RepoAction::List => cli::repo_list(),
+            RepoAction::List { json } => cli::repo_list(json),
             RepoAction::Remove { name } => cli::repo_remove(&name),
             RepoAction::Sync { name } => cli::repo_sync(&name),
             RepoAction::Check { name } => cli::repo_check(name.as_deref()),
@@ -193,7 +199,7 @@ fn main() -> ExitCode {
         Commands::Harnesses => cli::harnesses(),
         Commands::Models { harness } => cli::models(&harness),
         Commands::Config { action } => match action {
-            ConfigAction::Get => cli::config_get(),
+            ConfigAction::Get { json } => cli::config_get(json),
             ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),
         },
         Commands::Cancel {

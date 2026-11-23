@@ -107,8 +107,34 @@ pub fn repo_add(name_or_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn repo_list() -> Result<()> {
+pub fn repo_list(json: bool) -> Result<()> {
+    use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
     let repos = list_repos();
+    if json {
+        #[derive(serde::Serialize)]
+        struct RepoDto {
+            name: String,
+            github: String,
+            enabled: bool,
+            path: String,
+        }
+        let data: Vec<RepoDto> = repos
+            .iter()
+            .map(|r| RepoDto {
+                name: r.name.clone(),
+                github: r.github.clone(),
+                enabled: r.enabled,
+                path: r.path.clone(),
+            })
+            .collect();
+        let env = OutputEnvelope::new(data).with_meta(OutputMeta {
+            count: Some(repos.len()),
+            limit: None,
+            next_cursor: None,
+        });
+        println!("{}", to_json(&env).unwrap());
+        return Ok(());
+    }
     if repos.is_empty() {
         println!("No repos configured. Use 'factory repo add <repo>'.");
         return Ok(());
@@ -443,7 +469,7 @@ fn available_harnesses() -> String {
     }
 }
 
-pub fn config_get() -> Result<()> {
+pub fn config_get(json: bool) -> Result<()> {
     let mut cfg = load_config()?;
     // Apply repo-level factory.json if present in cwd or an ancestor.
     if let Some(repo_cfg) = find_factory_config() {
@@ -487,6 +513,43 @@ pub fn config_get() -> Result<()> {
                 }
             }
         }
+    }
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct ConfigDto {
+            harness: String,
+            model: String,
+            base_branch: String,
+            label: String,
+            max_attempts: u32,
+            mentions_enabled: bool,
+            mentions_usernames: Vec<String>,
+            mentions_usernames_extra: Vec<String>,
+            mentions_command: String,
+            mentions_daily_quota: u32,
+            mentions_report: bool,
+            webhook_port: u16,
+            webhook_bind: String,
+        }
+        let dto = ConfigDto {
+            harness: crate::t3::resolve_harness(&cfg.defaults.harness),
+            model: cfg.defaults.model.clone(),
+            base_branch: cfg.defaults.base_branch.clone(),
+            label: cfg.defaults.label.clone(),
+            max_attempts: cfg.defaults.max_attempts,
+            mentions_enabled: cfg.mentions.enabled,
+            mentions_usernames: cfg.mentions.usernames.clone(),
+            mentions_usernames_extra: cfg.mentions.usernames_extra.clone(),
+            mentions_command: cfg.mentions.command.clone(),
+            mentions_daily_quota: cfg.mentions.daily_quota,
+            mentions_report: cfg.mentions.report,
+            webhook_port: cfg.webhook.port,
+            webhook_bind: cfg.webhook.bind.clone(),
+        };
+        let env = OutputEnvelope::new(dto);
+        println!("{}", to_json(&env).unwrap());
+        return Ok(());
     }
     // Show the harness T3 will actually receive (legacy values resolve).
     println!(
