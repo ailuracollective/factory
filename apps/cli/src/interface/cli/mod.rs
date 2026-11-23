@@ -397,6 +397,7 @@ pub fn config_get() -> Result<()> {
     let cfg = load_config()?;
     println!("provider: {}", cfg.defaults.provider);
     println!("model:    {}", cfg.defaults.model);
+    println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
     Ok(())
 }
 
@@ -438,8 +439,16 @@ pub fn config_set(key: &str, value: &str) -> Result<()> {
             }
             cfg.defaults.model = value.to_string();
         }
+        "mentions.usernames" => {
+            cfg.mentions.usernames = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
+        }
         _ => {
-            println!("Unknown key: {}. Use 'provider' or 'model'.", key);
+            println!("Unknown key: {}. Use 'provider', 'model' or 'mentions.usernames'.", key);
             return Ok(());
         }
     }
