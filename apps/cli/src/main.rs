@@ -239,6 +239,13 @@ enum DaemonAction {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Reload daemon configuration
+    Reload {
+        #[arg(long)]
+        config: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -265,6 +272,7 @@ fn main() -> ExitCode {
             DaemonAction::Drain { timeout, json } => cli::drain(timeout, json),
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
             DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),
+            DaemonAction::Reload { config, json } => cli::daemon_reload(config.as_deref(), json),
         },
         Commands::Secret { action } => match action {
             SecretAction::Rotate => cli::secret_rotate(),
