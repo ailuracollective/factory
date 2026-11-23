@@ -33,12 +33,43 @@ Run `factory --help` for the full command list. Common commands:
 - `factory listen` — run webhook listener (processes GitHub events and runner jobs)
 - `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
 - `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
+- `factory harnesses` — list harnesses installed in T3 Code
+- `factory models <harness>` — list models of a harness
 
 ## Configuration
 
 Configuration and state are stored under:
 
 - `~/.config/ailuracollective/factory/`
+
+`defaults.harness` is the **agent harness** installed in T3 Code
+(`opencode`, `pi`, `codex`, `claudeAgent`, …). `defaults.model` is a model slug
+that belongs to that harness and is passed unchanged to T3, so it can name any
+model the harness exposes. Both are what the CLI hands to `t3 thread start` for
+the agent.
+
+```bash
+factory config set -g harness pi
+factory config set -g model opencode-go/beam-free
+```
+
+Values come from T3 Code's own catalog (`<T3CODE_HOME>/caches`, default
+`~/.t3/caches`), not from `opencode models`, so no harness or model names are
+hardcoded in the CLI:
+
+- `factory harnesses` lists the harnesses T3 reports as installed, marking the
+  configured one.
+- `factory models <harness>` lists the models that harness exposes, e.g.
+  `factory models opencode`.
+- An unknown harness prints the harnesses T3 reports as installed.
+
+`factory config set` validates `harness` against installed harnesses and
+`model` against the configured harness when T3's catalog is available; if it
+is not, values are stored as given.
+
+`ISSUE_FACTORY_HARNESS` and `ISSUE_FACTORY_MODEL` override the configured
+values for a single process (for example the systemd unit in
+`service.example`).
 
 ## More
 

@@ -56,3 +56,37 @@ fn repo_check_reports_missing_path_and_hook() {
             .any(|(l, m)| *l == "FAIL" && m.contains("hook_id missing"))
     );
 }
+
+#[test]
+fn config_set_validates_harness_and_model() {
+    let base = std::env::temp_dir().join(format!("factory-config-set-{}", std::process::id()));
+    let config = base.join("config.json");
+    let t3_home = base.join("t3");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(t3_home.join("caches")).unwrap();
+    std::fs::write(
+        t3_home.join("caches/opencode.json"),
+        r#"{"instanceId":"opencode","driver":"opencode","installed":true,"status":"ready",
+            "models":[{"slug":"openai/gpt-6"},{"slug":"opencode-go/beam-free"}]}"#,
+    )
+    .unwrap();
+
+    unsafe { std::env::set_var("ISSUE_FACTORY_CONFIG_FILE", &config) };
+    unsafe { std::env::set_var("T3CODE_HOME", &t3_home) };
+
+    // Unknown harness is rejected while T3 has probed its catalog.
+    config_set("harness", "nope", true).unwrap();
+    config_set("harness", "opencode", true).unwrap();
+    // Model is validated against that harness only.
+    config_set("model", "sonnet-4", true).unwrap();
+    config_set("model", "openai/gpt-6", true).unwrap();
+
+    let saved: crate::config::Config =
+        serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    assert_eq!(saved.defaults.harness, "opencode");
+    assert_eq!(saved.defaults.model, "openai/gpt-6");
+
+    unsafe { std::env::remove_var("ISSUE_FACTORY_CONFIG_FILE") };
+    unsafe { std::env::remove_var("T3CODE_HOME") };
+    let _ = std::fs::remove_dir_all(base);
+}

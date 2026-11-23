@@ -35,7 +35,7 @@ pub fn init(force: bool, local: bool) -> Result<()> {
         }
         let fc = FactoryRepoConfig {
             defaults: Some(Defaults {
-                provider: String::new(),
+                harness: String::new(),
                 model: String::new(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
@@ -377,45 +377,70 @@ pub use runner_cmd::runner;
 #[cfg(test)]
 mod tests;
 
-pub fn providers() -> Result<()> {
-    let (code, out) = run(&["opencode", "models"]);
-    if code != 0 {
-        println!("Failed to list models: {}", out);
+pub fn harnesses() -> Result<()> {
+    let installed = crate::t3::harnesses();
+    if installed.is_empty() {
+        println!("No installed harnesses found. Start T3 Code once so it can probe them.");
         return Ok(());
     }
-    let mut providers: Vec<String> = out
-        .lines()
-        .filter_map(|l| l.split('/').next())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    providers.sort();
-    providers.dedup();
-    for p in providers {
-        println!("{}", p);
+    let configured = cached_default_harness();
+    let name_w = installed.iter().map(|h| h.name.len()).max().unwrap_or(0);
+    let display_w = installed
+        .iter()
+        .map(|h| h.display_name.len())
+        .max()
+        .unwrap_or(0);
+    for h in installed {
+        let mark = if configured.as_deref() == Some(h.name.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        println!(
+            "{} {:<name_w$}  {:<display_w$}  {:<8} {:>3} models  {}",
+            mark,
+            h.name,
+            h.display_name,
+            h.version.as_deref().unwrap_or("-"),
+            h.models.len(),
+            h.status,
+        );
     }
     Ok(())
 }
 
-pub fn models(provider: Option<&str>) -> Result<()> {
-    let (code, out) = run(&["opencode", "models"]);
-    if code != 0 {
-        println!("Failed to list models: {}", out);
-        return Ok(());
+/// Configured harness resolved to a T3 id, used to flag the default row.
+fn cached_default_harness() -> Option<String> {
+    let configured = load_config().ok()?.defaults.harness;
+    if configured.trim().is_empty() {
+        return None;
     }
-    for line in out.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(p) = provider
-            && !line.starts_with(&format!("{}/", p))
-        {
-            continue;
-        }
-        println!("{}", line);
+    Some(crate::t3::resolve_harness(&configured))
+}
+
+pub fn models(harness: &str) -> Result<()> {
+    let name = crate::t3::resolve_harness(harness);
+    let Some(h) = crate::t3::harness(&name) else {
+        println!(
+            "Unknown harness: {}. Available: {}",
+            name,
+            available_harnesses()
+        );
+        return Ok(());
+    };
+    for m in h.models {
+        println!("{}", m);
     }
     Ok(())
+}
+
+fn available_harnesses() -> String {
+    let names: Vec<String> = crate::t3::harnesses().into_iter().map(|h| h.name).collect();
+    if names.is_empty() {
+        "none (start T3 Code so it can probe them)".to_string()
+    } else {
+        names.join(", ")
+    }
 }
 
 pub fn config_get() -> Result<()> {
@@ -423,8 +448,8 @@ pub fn config_get() -> Result<()> {
     // Apply repo-level factory.json if present in cwd or an ancestor.
     if let Some(repo_cfg) = find_factory_config() {
         if let Some(d) = repo_cfg.defaults {
-            if !d.provider.is_empty() {
-                cfg.defaults.provider = d.provider;
+            if !d.harness.is_empty() {
+                cfg.defaults.harness = d.harness;
             }
             if !d.model.is_empty() {
                 cfg.defaults.model = d.model;
@@ -463,7 +488,11 @@ pub fn config_get() -> Result<()> {
             }
         }
     }
-    println!("provider: {}", cfg.defaults.provider);
+    // Show the harness T3 will actually receive (legacy values resolve).
+    println!(
+        "harness:  {}",
+        crate::t3::resolve_harness(&cfg.defaults.harness)
+    );
     println!("model:    {}", cfg.defaults.model);
     println!("base_branch: {}", cfg.defaults.base_branch);
     println!("label: {}", cfg.defaults.label);
@@ -496,16 +525,6 @@ fn find_factory_config() -> Option<FactoryRepoConfig> {
 }
 
 pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
-    // validate against opencode models
-    let (code, out) = run(&["opencode", "models"]);
-    let models: Vec<&str> = if code == 0 {
-        out.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect()
-    } else {
-        Vec::new()
-    };
     if !global {
         let path = std::env::current_dir()
             .unwrap_or_default()
@@ -518,7 +537,7 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         };
         if fc.defaults.is_none() {
             fc.defaults = Some(Defaults {
-                provider: String::new(),
+                harness: String::new(),
                 model: String::new(),
                 base_branch: String::new(),
                 label: String::new(),
@@ -531,7 +550,7 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         let d = fc.defaults.as_mut().unwrap();
         let m = fc.mentions.as_mut().unwrap();
         match key {
-            "provider" => d.provider = value.to_string(),
+            "harness" => d.harness = value.to_string(),
             "model" => d.model = value.to_string(),
             "base_branch" => d.base_branch = value.to_string(),
             "label" => d.label = value.to_string(),
@@ -589,27 +608,37 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
     }
     let mut cfg = load_config()?;
     match key {
-        "provider" => {
-            let valid = models.iter().any(|m| m.split('/').next() == Some(value));
-            if !valid {
-                println!(
-                    "Unknown provider: {}. Available: {}",
-                    value,
-                    models
-                        .iter()
-                        .map(|m| m.split('/').next().unwrap_or(""))
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                return Ok(());
+        "harness" => {
+            let installed = crate::t3::harnesses();
+            // Validate only when T3 has probed its harnesses; otherwise accept.
+            if !installed.is_empty() {
+                let Some(h) = crate::t3::harness(value) else {
+                    println!(
+                        "Unknown harness: {}. Available: {}",
+                        value,
+                        installed
+                            .iter()
+                            .map(|h| h.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    return Ok(());
+                };
+                cfg.defaults.harness = h.name;
+            } else {
+                cfg.defaults.harness = value.to_string();
             }
-            cfg.defaults.provider = value.to_string();
         }
         "model" => {
-            if !models.contains(&value) {
-                println!("Unknown model: {}. Use 'factory models' to list.", value);
+            let harness = crate::t3::harness(&cfg.defaults.harness);
+            if let Some(h) = &harness
+                && !h.models.is_empty()
+                && !h.models.iter().any(|m| m == value)
+            {
+                println!(
+                    "Unknown model for {}: {}. Use 'factory models {}' to list.",
+                    h.name, value, h.name
+                );
                 return Ok(());
             }
             cfg.defaults.model = value.to_string();
@@ -661,13 +690,18 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         }
         _ => {
             println!(
-                "Unknown key: {}. Use 'provider', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.",
+                "Unknown key: {}. Use 'harness', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.",
                 key
             );
             return Ok(());
         }
     }
     save_config(&cfg)?;
-    println!("Set {} = {}", key, value);
+    let stored = if key == "harness" {
+        cfg.defaults.harness.as_str()
+    } else {
+        value
+    };
+    println!("Set {} = {}", key, stored);
     Ok(())
 }

@@ -38,4 +38,4 @@
 ## Compatibility
 
 - Keep local listener and commands.
-- No forced migration of config; new keys added with defaults.
+- Config keys are additive with defaults, except the agent selection key: it is now `defaults.harness` (harness installed in T3 Code). Files written before that rename need `factory config set -g harness <harness>` once per machine.

@@ -16,15 +16,17 @@ Single Rust crate `factory` (edition 2021) with modules:
 
 ## Public CLI commands
 
-`init`, `repo add/list/remove/sync`, `start/stop/restart/status`, `secret rotate`, `logs`, `doctor`, `test`, `run`, `listen`. These must remain compatible.
+`init`, `repo add/list/remove/sync`, `start/stop/restart/status`, `secret rotate`, `logs`, `doctor`, `test`, `run`, `listen`, `harnesses`, `models`. These must remain compatible.
 
 ## Config & state
 
-JSON on disk under `~/.config/ailuracollective/factory/`. Env overrides: `ISSUE_FACTORY_*`. State persists issues map with status (pending/running/failed/completed), attempts, thread_id, last_error.
+JSON on disk under `~/.config/ailuracollective/factory/`. Env overrides: `ISSUE_FACTORY_*`. Agent defaults are `defaults.harness` (harness installed in T3 Code) and `defaults.model` (slug of that harness). State persists issues map with status (pending/running/failed/completed), attempts, thread_id, last_error.
 
 ## T3 integration
 
-`agent::launch_agent` shells out to `t3 thread start` with provider/model/worktree/branch. Parsing thread id from JSON stdout. Must remain; provider abstraction added later without breaking.
+`agent::launch_agent` shells out to `t3 thread start` with harness/model/worktree/branch (`--provider`/`--model`). Parsing thread id from JSON stdout. Must remain; harness/model selection added later without breaking.
+
+Harnesses and their models come from T3 Code's catalog (`<T3CODE_HOME>/caches`, default `~/.t3/caches`) through `infra/t3.rs`; `factory harnesses` and `factory models <harness>` expose it, and `config set` validates against it. No harness or model names are hardcoded.
 
 ## Repo/worktree handling
 

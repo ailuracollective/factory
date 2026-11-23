@@ -159,8 +159,10 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
     };
 
     let defaults = &config.defaults;
-    let provider =
-        std::env::var("ISSUE_FACTORY_PROVIDER").unwrap_or_else(|_| defaults.provider.clone());
+    let harness = match std::env::var("ISSUE_FACTORY_HARNESS") {
+        Ok(v) => v,
+        Err(_) => crate::t3::resolve_harness(&defaults.harness),
+    };
     let model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
     let base_branch =
         std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| defaults.base_branch.clone());
@@ -172,8 +174,8 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
         .arg(&prompt)
         .arg("--title")
         .arg(&thread_title)
-        .arg("--provider")
-        .arg(&provider)
+        .arg("--harness")
+        .arg(&harness)
         .arg("--model")
         .arg(&model)
         .arg("--worktree")
