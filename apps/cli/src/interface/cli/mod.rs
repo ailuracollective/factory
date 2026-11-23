@@ -313,11 +313,55 @@ pub fn listen(port: Option<u16>) -> Result<()> {
     rt.block_on(crate::listener::serve(config))
 }
 
-pub fn status() -> Result<()> {
+pub fn status(json: bool) -> Result<()> {
     let (code, msg) = run(&["systemctl", "--user", "is-active", "factory"]);
-    println!("Daemon: {}", if msg.is_empty() { "unknown" } else { &msg });
-    let _ = code;
+    // Distinguish active/inactive/unknown; a failure to query systemd is an error.
+    let daemon_state = match (code, msg.trim()) {
+        (0, "active") => "active",
+        (_, "inactive") => "inactive",
+        (3, _) => "inactive",
+        (_, "active") => "active",
+        _ if code == 127 => {
+            anyhow::bail!("failed to query systemd: {}", msg);
+        }
+        _ => "unknown",
+    };
     let config = load_config()?;
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct RepoSummary {
+            name: String,
+            github: String,
+            enabled: bool,
+        }
+        #[derive(serde::Serialize)]
+        struct StatusDto {
+            daemon: String,
+            repos_count: usize,
+            repos: Vec<RepoSummary>,
+            funnel_url: String,
+        }
+        let repos: Vec<RepoSummary> = config
+            .repos
+            .iter()
+            .map(|r| RepoSummary {
+                name: r.name.clone(),
+                github: r.github.clone(),
+                enabled: r.enabled,
+            })
+            .collect();
+        let dto = StatusDto {
+            daemon: daemon_state.to_string(),
+            repos_count: config.repos.len(),
+            repos,
+            funnel_url: config.webhook.funnel_url.clone(),
+        };
+        let env = OutputEnvelope::new(dto);
+        println!("{}", to_json(&env).unwrap());
+        return Ok(());
+    }
+    println!("Daemon: {}", daemon_state);
     println!("Repos: {}", config.repos.len());
     for repo in &config.repos {
         println!(
