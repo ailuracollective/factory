@@ -206,6 +206,11 @@ enum DaemonAction {
     Stop,
     /// Restart the daemon
     Restart,
+    /// Resume accepting jobs after drain
+    Resume {
+        #[arg(long)]
+        json: bool,
+    },
     /// Show daemon status
     Status {
         #[arg(long)]
@@ -251,6 +256,7 @@ fn main() -> ExitCode {
             DaemonAction::Start => cli::start(),
             DaemonAction::Stop => cli::stop(),
             DaemonAction::Restart => cli::restart(),
+            DaemonAction::Resume { json } => cli::resume(json),
             DaemonAction::Status { json, verbose } => cli::status(json, verbose),
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
             DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),

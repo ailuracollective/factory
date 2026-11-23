@@ -491,6 +491,42 @@ pub fn restart() -> Result<()> {
     restart_with(&SystemdUserServiceManager)
 }
 
+#[derive(serde::Serialize)]
+struct DaemonResumeData {
+    state: &'static str,
+}
+
+pub fn resume(json: bool) -> Result<()> {
+    let (code, msg) = run(&["systemctl", "--user", "is-active", "factory"]);
+    let active = matches!((code, msg.trim()), (0, "active") | (_, "active"));
+    if !active {
+        if json {
+            use crate::interface::output::{OutputError, to_json};
+            println!(
+                "{}",
+                to_json(&OutputError::new(
+                    "DAEMON_UNREACHABLE",
+                    "daemon is not running".to_string()
+                ))
+                .unwrap()
+            );
+        } else {
+            anyhow::bail!("daemon is not running");
+        }
+        anyhow::bail!("daemon is not running");
+    }
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        println!(
+            "{}",
+            to_json(&OutputEnvelope::new(DaemonResumeData { state: "running" })).unwrap()
+        );
+    } else {
+        println!("Daemon resumed: accepting jobs.");
+    }
+    Ok(())
+}
+
 pub fn listen(port: Option<u16>) -> Result<()> {
     let mut config = load_config()?;
     if let Some(p) = port {
