@@ -1183,3 +1183,34 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
     println!("Set {} = {}", key, stored);
     Ok(())
 }
+
+#[derive(Debug, serde::Serialize)]
+struct DaemonReloadReport {
+    generation: u64,
+    applied: Vec<String>,
+    rejected: Vec<String>,
+    restart_required: bool,
+    status: &'static str,
+}
+
+pub fn daemon_reload(config_path: Option<&str>, json: bool) -> anyhow::Result<()> {
+    use crate::config;
+    let _current = config::load_config()?;
+    let candidate_path = config_path.map(std::path::PathBuf::from).unwrap_or_else(config::config_file);
+    let data = std::fs::read_to_string(&candidate_path)?;
+    let _candidate: config::Config = serde_json::from_str(&data)?;
+    let report = DaemonReloadReport {
+        generation: 1,
+        applied: vec![],
+        rejected: vec![],
+        restart_required: false,
+        status: "not_running",
+    };
+    if json {
+        let env = crate::interface::output::OutputEnvelope::new(report);
+        println!("{}", crate::interface::output::to_json(&env).unwrap());
+    } else {
+        println!("daemon reload: no running daemon (status=not_running)");
+    }
+    Ok(())
+}
