@@ -76,7 +76,14 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
     } else {
         repo
     };
-    if !state.config.repo.is_empty() && repo != state.config.repo {
+    // Allow any repository registered in config.repos (multi-repo support).
+    // Fall back to the single legacy config.repo when no repos are registered.
+    let allowed = if !state.config.repos.is_empty() {
+        state.config.repos.iter().any(|r| r.github == repo)
+    } else {
+        state.config.repo.is_empty() || repo == state.config.repo
+    };
+    if !allowed {
         return "ignored: repo not configured".to_string();
     }
 
