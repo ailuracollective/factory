@@ -38,7 +38,7 @@ pub fn build_prompt(issue: &Value) -> String {
         .unwrap_or("")
         .trim();
     format!(
-        "Resolve GitHub issue #{number}: {url}\n\nRead the issue via `gh issue view {number}` for full details.\n\n## Instructions\n- Work in the provided worktree/branch.\n- Implement the requested change with tests.\n- Before finishing, run the project's full test suite, linters and build; only proceed if every check passes. If a check fails, fix the underlying cause and re-run until green — do not skip, disable, or weaken tests to make them pass.\n- After coding and passing checks, you MUST create a pull request before considering the task finished. Push your branch and run `gh pr create` for the current branch; do not stop after coding or report success without a PR URL.\n- The PR title and description must summarize the change, the description must include the passing check results and `Closes #{number}`.\n- If PR creation fails, diagnose and retry when possible. If it still cannot be created, report the exact error and explicitly say no PR was created; do not claim the task is complete.\n- After opening the PR, inspect its check runs/jobs (for example with `gh pr checks` and `gh run view`). Wait for checks that are still running, and fix code failures then push updates and re-check.\n- Do not wait forever on checks that cannot pass: inspect failed jobs/logs to decide whether a failure is caused by this change and can be fixed. If checks are blocked by external/configuration issues, unavailable required secrets/services, permissions, or another condition you cannot fix, stop waiting, report which jobs failed or are blocked and why, and provide the PR URL. Do not claim checks passed in that case.\n- Do not merge the pull request.\n",
+        "Resolve GitHub issue #{number}: {url}\n\n## Task\nRead the issue with `gh issue view {number}` and inspect the relevant code before making changes. Work in the provided worktree/branch, implement the requested change, and add or update focused tests.\n\n## Verify\nRun the checks relevant to the change, then the project's required tests, linters, and build. Fix failures caused by the change and rerun them. Never skip, disable, or weaken tests. Report any unrelated or externally blocked checks accurately.\n\n## Pull request\nPush the branch and create a PR with `gh pr create`. Include a concise summary, actual check results, and `Closes #{number}` in its description. Inspect PR checks with `gh pr checks` (and `gh run view` for failures); fix change-related failures and push updates. If checks are externally blocked, report the blocker and PR URL without claiming success. If PR creation fails, report the exact error and do not claim completion. Do not merge the PR.\n",
         number = number,
         url = url
     )
@@ -258,6 +258,8 @@ mod tests {
         assert!(p.contains("issue #7"));
         assert!(p.contains("https://example.com/issue/7"));
         assert!(p.contains("Closes #7"));
+        assert!(p.contains("relevant code"));
+        assert!(p.contains("Do not merge"));
     }
 
     #[test]
