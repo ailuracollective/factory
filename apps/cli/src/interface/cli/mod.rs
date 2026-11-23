@@ -403,13 +403,30 @@ pub fn config_get() -> Result<()> {
 pub fn config_set(key: &str, value: &str) -> Result<()> {
     // validate against opencode models
     let (code, out) = run(&["opencode", "models"]);
-    let models: Vec<&str> = if code == 0 { out.lines().map(str::trim).filter(|l| !l.is_empty()).collect() } else { Vec::new() };
+    let models: Vec<&str> = if code == 0 {
+        out.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut cfg = load_config()?;
     match key {
         "provider" => {
             let valid = models.iter().any(|m| m.split('/').next() == Some(value));
             if !valid {
-                println!("Unknown provider: {}. Available: {}", value, models.iter().map(|m| m.split('/').next().unwrap_or("")).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", "));
+                println!(
+                    "Unknown provider: {}. Available: {}",
+                    value,
+                    models
+                        .iter()
+                        .map(|m| m.split('/').next().unwrap_or(""))
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 return Ok(());
             }
             cfg.defaults.provider = value.to_string();
