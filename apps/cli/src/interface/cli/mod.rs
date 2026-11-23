@@ -391,50 +391,104 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn start() -> Result<()> {
-    let (code, _) = run(&["systemctl", "--user", "start", "factory"]);
-    if code == 0 {
-        println!("Factory started.");
-        return Ok(());
+pub trait ServiceManager {
+    fn start(&self) -> Result<(), String>;
+    fn stop(&self) -> Result<(), String>;
+    fn restart(&self) -> Result<(), String>;
+}
+
+pub struct SystemdUserServiceManager;
+
+impl ServiceManager for SystemdUserServiceManager {
+    fn start(&self) -> Result<(), String> {
+        let (code, msg) = run(&["systemctl", "--user", "start", "factory"]);
+        if code == 0 {
+            Ok(())
+        } else if code == 127 {
+            Err(if msg.is_empty() {
+                "unsupported service manager: systemctl not found".to_string()
+            } else {
+                format!("unsupported service manager: {}", msg)
+            })
+        } else {
+            Err(if msg.is_empty() {
+                format!("failed to start (exit code {})", code)
+            } else {
+                format!("{} (exit code {})", msg, code)
+            })
+        }
     }
-    println!(
-        "systemd not available. Run 'factory listen' to start the listener in the foreground."
-    );
+
+    fn stop(&self) -> Result<(), String> {
+        let (code, msg) = run(&["systemctl", "--user", "stop", "factory"]);
+        if code == 0 {
+            Ok(())
+        } else if code == 127 {
+            Err(if msg.is_empty() {
+                "unsupported service manager: systemctl not found".to_string()
+            } else {
+                format!("unsupported service manager: {}", msg)
+            })
+        } else {
+            Err(if msg.is_empty() {
+                format!("failed to stop (exit code {})", code)
+            } else {
+                format!("{} (exit code {})", msg, code)
+            })
+        }
+    }
+
+    fn restart(&self) -> Result<(), String> {
+        let (code, msg) = run(&["systemctl", "--user", "restart", "factory"]);
+        if code == 0 {
+            Ok(())
+        } else if code == 127 {
+            Err(if msg.is_empty() {
+                "unsupported service manager: systemctl not found".to_string()
+            } else {
+                format!("unsupported service manager: {}", msg)
+            })
+        } else {
+            Err(if msg.is_empty() {
+                format!("failed to restart (exit code {})", code)
+            } else {
+                format!("{} (exit code {})", msg, code)
+            })
+        }
+    }
+}
+
+pub fn start_with<M: ServiceManager>(mgr: &M) -> Result<()> {
+    mgr.start().map_err(anyhow::Error::msg).map(|()| {
+        println!("Factory started.");
+    })?;
     Ok(())
+}
+
+pub fn stop_with<M: ServiceManager>(mgr: &M) -> Result<()> {
+    mgr.stop().map_err(anyhow::Error::msg).map(|()| {
+        println!("Factory stopped.");
+    })?;
+    Ok(())
+}
+
+pub fn restart_with<M: ServiceManager>(mgr: &M) -> Result<()> {
+    mgr.restart().map_err(anyhow::Error::msg).map(|()| {
+        println!("Factory restarted.");
+    })?;
+    Ok(())
+}
+
+pub fn start() -> Result<()> {
+    start_with(&SystemdUserServiceManager)
 }
 
 pub fn stop() -> Result<()> {
-    let (code, msg) = run(&["systemctl", "--user", "stop", "factory"]);
-    if code == 0 {
-        println!("Factory stopped.");
-    } else {
-        println!(
-            "{}",
-            if msg.is_empty() {
-                "Failed to stop."
-            } else {
-                &msg
-            }
-        );
-    }
-    Ok(())
+    stop_with(&SystemdUserServiceManager)
 }
 
 pub fn restart() -> Result<()> {
-    let (code, msg) = run(&["systemctl", "--user", "restart", "factory"]);
-    if code == 0 {
-        println!("Factory restarted.");
-    } else {
-        println!(
-            "{}",
-            if msg.is_empty() {
-                "Failed to restart."
-            } else {
-                &msg
-            }
-        );
-    }
-    Ok(())
+    restart_with(&SystemdUserServiceManager)
 }
 
 pub fn listen(port: Option<u16>) -> Result<()> {

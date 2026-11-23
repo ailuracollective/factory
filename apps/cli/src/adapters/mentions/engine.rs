@@ -92,8 +92,7 @@ impl<'a> Engine<'a> {
                 let _ = self
                     .store
                     .record(&key, "completed", &format!("op=fix thread={thread}"));
-                self.dispatcher
-                    .report(event, "completed");
+                self.dispatcher.report(event, "completed");
                 Outcome::Launched(thread)
             }
             Err(e) => {

@@ -90,3 +90,64 @@ fn config_set_validates_harness_and_model() {
     unsafe { std::env::remove_var("T3CODE_HOME") };
     let _ = std::fs::remove_dir_all(base);
 }
+
+struct MockManager {
+    start_res: Result<(), String>,
+    stop_res: Result<(), String>,
+    restart_res: Result<(), String>,
+}
+
+impl super::ServiceManager for MockManager {
+    fn start(&self) -> Result<(), String> {
+        self.start_res.clone()
+    }
+    fn stop(&self) -> Result<(), String> {
+        self.stop_res.clone()
+    }
+    fn restart(&self) -> Result<(), String> {
+        self.restart_res.clone()
+    }
+}
+
+#[test]
+fn start_with_prints_success_on_ok() {
+    let m = MockManager {
+        start_res: Ok(()),
+        stop_res: Ok(()),
+        restart_res: Ok(()),
+    };
+    assert!(super::start_with(&m).is_ok());
+}
+
+#[test]
+fn start_with_propagates_failure() {
+    let m = MockManager {
+        start_res: Err("boom (exit code 1)".to_string()),
+        stop_res: Ok(()),
+        restart_res: Ok(()),
+    };
+    let err = super::start_with(&m).unwrap_err();
+    assert!(err.to_string().contains("boom"));
+}
+
+#[test]
+fn stop_with_propagates_unsupported() {
+    let m = MockManager {
+        start_res: Ok(()),
+        stop_res: Err("unsupported service manager: systemctl not found".to_string()),
+        restart_res: Ok(()),
+    };
+    let err = super::stop_with(&m).unwrap_err();
+    assert!(err.to_string().contains("unsupported"));
+}
+
+#[test]
+fn restart_with_propagates_failure() {
+    let m = MockManager {
+        start_res: Ok(()),
+        stop_res: Ok(()),
+        restart_res: Err("failed to restart (exit code 3)".to_string()),
+    };
+    let err = super::restart_with(&m).unwrap_err();
+    assert!(err.to_string().contains("failed to restart"));
+}
