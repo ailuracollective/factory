@@ -11,30 +11,19 @@ env:
 
 jobs:
   build:
-    name: Build & test (pnpm workspace)
+    name: Build & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - name: Install
-        run: pnpm install --frozen-lockfile
-      # Temporary: only validate the CLI while gateway/dashboard CI is paused.
       - name: Format check
-        run: pnpm --filter cli format:check
+        run: cargo fmt --all -- --check
       - name: Clippy
-        run: pnpm --filter cli clippy
+        run: cargo clippy -p factory -- -D warnings
       - name: Build
-        run: pnpm --filter cli build
+        run: cargo build -p factory
       - name: Test
-        run: pnpm --filter cli test
+        run: cargo test -p factory

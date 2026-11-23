@@ -6,10 +6,9 @@ Written in Rust. Runs locally on your machine — no cloud hosting required.
 ## Build
 
 ```bash
-pnpm install
-pnpm --filter cli build
-# binary: apps/cli/target/release/factory
-cp apps/cli/target/release/factory ~/.local/bin/factory
+cargo build -p factory --release
+# binary: target/release/factory
+cp target/release/factory ~/.local/bin/factory
 ```
 
 ## Quick start

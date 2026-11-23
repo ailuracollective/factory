@@ -12,5 +12,5 @@ Conventions:
 Adding a migration:
 1. Create `apps/gateway/migrations/NNNN_description.sql`.
 2. Append an entry to `MIGRATIONS`.
-3. Run `pnpm --filter gateway test` (validates ordering/uniqueness).
-4. Run `pnpm --filter gateway build`.
+3. Run `cargo test -p factory-gateway` (validates ordering/uniqueness).
+4. Run `cargo build -p factory-gateway --target wasm32-unknown-unknown --release`.

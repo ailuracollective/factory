@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/cli",
+    "apps/gateway",
+    "apps/bot",
+    "packages/notifications",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"

@@ -8,28 +8,24 @@ Ailura Factory is a monorepo for AI-assisted development automation.
 
 - `apps/cli` — Rust CLI (`factory`), runs agents locally (T3 Code today).
 - `apps/gateway` — Rust Cloudflare Worker (GitHub App gateway, D1 persistence).
-- `apps/dashboard` — TanStack (React) admin dashboard.
+- `apps/bot` — Rust bot for chat notifications.
+- `packages/notifications` — Shared notification contract.
 - `docs/` — architecture, audit, migration plan, roadmap.
 - `Cargo.toml` (root) — Cargo workspace for Rust crates.
-- `pnpm-workspace.yaml` — pnpm workspace for TypeScript apps.
 
 ## Build / Test / Lint
 
-Rust (via pnpm workspace):
 ```bash
-pnpm install
-pnpm lint
-pnpm lint:check
-pnpm format
-pnpm format:check
-pnpm clippy
-pnpm build
-pnpm test
+cargo fmt --all -- --check
+cargo clippy -p factory -- -D warnings
+cargo build -p factory
+cargo test -p factory
 ```
 
-Dashboard:
+Gateway (wasm32):
 ```bash
-pnpm --filter dashboard build
+cargo clippy -p factory-gateway --target wasm32-unknown-unknown -- -D warnings
+cargo build -p factory-gateway --target wasm32-unknown-unknown --release
 ```
 
 ## Conventions

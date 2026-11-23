@@ -2,9 +2,8 @@
 
 ## Monorepo
 
-- pnpm workspace (`pnpm-workspace.yaml`) with `apps/*` (and future `packages/*`), including Rust apps `apps/cli`, `apps/gateway` and `apps/dashboard`.
-- Rust apps invoke cargo through pnpm scripts; no Cargo workspace at root.
-- Each app builds/deploy independently.
+- Cargo workspace at root (`Cargo.toml`) with Rust crates under `apps/*` and `packages/*`.
+- Each app builds/tests independently via cargo.
 
 ## Components
 
@@ -28,8 +27,6 @@ Cloudflare Worker (Rust, wasm32-unknown-unknown). Responsibilities:
 
 No Tokio/SQLx. Use `worker` crate, D1 bindings, async/await. Axum may be used via `http` feature for routing if needed; prefer `worker::Router` for simplicity.
 
-### Factory Dashboard (`apps/dashboard`)
-TanStack (React) + TanStack Router + TanStack Query. Admin auth via GitHub. Consumes Gateway admin API.
 
 ## Data flow (MVP)
 

@@ -3,8 +3,8 @@
 ## Phase 0 — Restructure (done)
 - Move `src/` to `apps/cli/src/`.
 - Move Cargo manifest to `apps/cli/Cargo.toml`.
-- Add Cargo workspace root with `apps/cli`, `apps/gateway`.
-- Add pnpm workspace + dashboard scaffold.
+- Add Cargo workspace root (`Cargo.toml`) with Rust crates.
+- Remove pnpm workspace and dashboard scaffold.
 - Update CI.
 - Add docs.
 
@@ -22,10 +22,8 @@
 - Report status/result.
 - Reconcile on restart.
 
-## Phase 3 — Dashboard
-- GitHub admin auth.
-- Views for installations/repos/policies/jobs/audit.
-- Cancel actions.
+## Phase 3 — Dashboard (removed)
+- Dashboard project removed from the monorepo; admin flows go through Gateway/admin APIs for now.
 
 ## Phase 4 — PR events & hardening
 - PR comment handling.
