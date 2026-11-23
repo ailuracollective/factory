@@ -76,9 +76,10 @@ values for a single process (for example the systemd unit in
 The daemon emits compact warning-and-error logs by default. Set `RUST_LOG=info`
 in the systemd unit temporarily when diagnosing normal webhook activity.
 Systemd's journal rate-limits each service; the example unit allows 200 messages
-per 30 seconds before journald suppresses excess output. Journal retention is
-managed globally by journald, so use `journalctl --user -u factory --since today`
-to inspect Factory logs without vacuuming logs belonging to other services.
+per 30 seconds before journald suppresses excess output. Journal retention stays
+under the system-wide journald policy. Inspect Factory logs with
+`journalctl --user -u factory --since today`; do not vacuum the shared journal
+to clean only Factory logs.
 
 ## More
 
