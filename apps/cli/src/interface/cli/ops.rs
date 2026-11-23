@@ -668,3 +668,152 @@ pub fn agent_run(
         }
     }
 }
+
+pub fn agent_check(
+    repo: Option<&str>,
+    harness_override: Option<&str>,
+    model_override: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let config = load_config()?;
+    let defaults = &config.defaults;
+
+    // resolve harness/model like agent run: env overrides then args
+    let mut harness = match std::env::var("ISSUE_FACTORY_HARNESS") {
+        Ok(v) => v,
+        Err(_) => crate::t3::resolve_harness(&defaults.harness),
+    };
+    if let Some(h) = harness_override {
+        harness = crate::t3::resolve_harness(h);
+    }
+    let mut model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
+    if let Some(m) = model_override {
+        model = m.to_string();
+    }
+
+    #[derive(serde::Serialize)]
+    struct Check {
+        id: &'static str,
+        status: &'static str,
+        message: String,
+    }
+    let mut checks: Vec<Check> = Vec::new();
+    let mut required_failed = false;
+
+    // project path / repo registration
+    if let Some(repo_name) = repo {
+        match get_repo(&config, repo_name) {
+            Some(r) => {
+                let project = std::path::PathBuf::from(&r.path);
+                if project.exists() {
+                    checks.push(Check {
+                        id: "project_path",
+                        status: "pass",
+                        message: format!("project path exists: {}", project.display()),
+                    });
+                } else {
+                    checks.push(Check {
+                        id: "project_path",
+                        status: "fail",
+                        message: format!("project path not found: {}", project.display()),
+                    });
+                    required_failed = true;
+                }
+                checks.push(Check {
+                    id: "repo_registration",
+                    status: "pass",
+                    message: format!("repo registered: {}", r.github),
+                });
+            }
+            None => {
+                checks.push(Check {
+                    id: "repo_registration",
+                    status: "fail",
+                    message: format!("repo not found: {repo_name}"),
+                });
+                required_failed = true;
+            }
+        }
+    } else {
+        checks.push(Check {
+            id: "repo_registration",
+            status: "warn",
+            message: "no --repo provided; skipping repo/project checks".to_string(),
+        });
+    }
+
+    // harness availability
+    let installed = crate::t3::harnesses();
+    let h = crate::t3::harness(&harness);
+    if h.is_some() {
+        checks.push(Check {
+            id: "harness_available",
+            status: "pass",
+            message: format!("harness available: {harness}"),
+        });
+    } else if installed.is_empty() {
+        checks.push(Check {
+            id: "harness_available",
+            status: "unknown",
+            message: format!("cannot determine harness availability (T3 cache missing): {harness}"),
+        });
+    } else {
+        checks.push(Check {
+            id: "harness_available",
+            status: "fail",
+            message: format!("harness not installed: {harness}"),
+        });
+        required_failed = true;
+    }
+
+    // model discovery
+    match h {
+        Some(hh) => {
+            if hh.models.is_empty() || hh.models.contains(&model) {
+                checks.push(Check {
+                    id: "model_discovery",
+                    status: "pass",
+                    message: format!("model available: {model}"),
+                });
+            } else {
+                checks.push(Check {
+                    id: "model_discovery",
+                    status: "fail",
+                    message: format!("model not found in harness {harness}: {model}"),
+                });
+                required_failed = true;
+            }
+        }
+        None => {
+            checks.push(Check {
+                id: "model_discovery",
+                status: "unknown",
+                message: format!("cannot verify model (harness unavailable): {model}"),
+            });
+        }
+    }
+
+    let overall = if required_failed { "fail" } else { "pass" };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "harness": harness,
+                "model": model,
+                "overall": overall,
+                "checks": checks,
+            })
+        );
+    } else {
+        for c in &checks {
+            println!("[{}] {} - {}", c.status.to_uppercase(), c.id, c.message);
+        }
+        println!("Overall: {}", overall);
+    }
+
+    if required_failed {
+        return Err(anyhow::anyhow!("agent check failed"));
+    }
+    Ok(())
+}

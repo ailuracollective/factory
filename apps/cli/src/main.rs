@@ -135,6 +135,17 @@ enum AgentAction {
         #[arg(long)]
         json: bool,
     },
+    /// Preflight diagnostics for agent execution
+    Check {
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List harnesses installed in T3 Code
     Harnesses {
         #[arg(long)]
@@ -352,6 +363,12 @@ fn main() -> ExitCode {
                 model.as_deref(),
                 json,
             ),
+            AgentAction::Check {
+                repo,
+                harness,
+                model,
+                json,
+            } => cli::agent_check(repo.as_deref(), harness.as_deref(), model.as_deref(), json),
             AgentAction::Harnesses { json } => cli::harnesses(json),
             AgentAction::Models { harness, json } => cli::models(&harness, json),
         },
