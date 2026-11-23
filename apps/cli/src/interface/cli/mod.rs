@@ -21,7 +21,27 @@ pub(super) fn run(cmd: &[&str]) -> (i32, String) {
     }
 }
 
-pub fn init(force: bool) -> Result<()> {
+pub fn init(force: bool, local: bool) -> Result<()> {
+    if local {
+        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        if path.exists() && !force {
+            println!("factory.json already exists. Use --force to overwrite.");
+            return Ok(());
+        }
+        let fc = FactoryRepoConfig {
+            defaults: Some(Defaults {
+                provider: String::new(),
+                model: String::new(),
+                base_branch: "main".to_string(),
+                label: "status/ready".to_string(),
+                max_attempts: 3,
+            }),
+            mentions: Some(MentionsConfig::default()),
+        };
+        std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
+        println!("Created {}", path.display());
+        return Ok(());
+    }
     use crate::config::{Config, config_dir, config_file, save_config};
     let secret = generate_secret();
     let dir = config_dir();
