@@ -20,8 +20,8 @@ enum Commands {
     Init {
         #[arg(long)]
         force: bool,
-        #[arg(long)]
-        local: bool,
+        #[arg(short = 'g', long)]
+        global: bool,
     },
     /// Manage repos
     Repo {
@@ -142,7 +142,7 @@ fn main() -> ExitCode {
         .init();
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Init { force, local } => cli::init(force, local),
+        Commands::Init { force, global } => cli::init(force, !global),
         Commands::Repo { action } => match action {
             RepoAction::Add { repo } => cli::repo_add(repo.as_deref().unwrap_or(".")),
             RepoAction::List => cli::repo_list(),
