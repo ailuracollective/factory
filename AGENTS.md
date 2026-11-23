@@ -13,6 +13,8 @@ Ailura Factory is a monorepo for AI-assisted development automation.
 - `docs/` — architecture, audit, migration plan, roadmap.
 - `Cargo.toml` (root) — Cargo workspace for Rust crates.
 
+Each app directory contains a `README.md` with app-specific setup and usage.
+
 ## Build / Test / Lint
 
 ```bash
@@ -43,3 +45,4 @@ cargo build -p gateway --target wasm32-unknown-unknown --release
 
 - Gateway does not replace the local listener; keep both during transition.
 - Do not couple gateway to a specific AI provider.
+- See app READMEs (`apps/*/README.md`) for per-app details.
