@@ -34,7 +34,6 @@ Run `factory --help` for the full command list. Common commands:
 - `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
 - `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
 - `factory harnesses` — list harnesses installed in T3 Code
-- `factory providers <harness>` — list model providers inside a harness
 - `factory models <harness>` — list models of a harness
 
 ## Configuration
@@ -62,13 +61,15 @@ hardcoded in the CLI:
   configured one.
 - `factory models <harness>` lists the models that harness exposes, e.g.
   `factory models opencode`.
-- `factory providers <harness>` lists that harness's model providers (slug
-  prefix, e.g. `openai`, `opencode-go`).
 - An unknown harness prints the harnesses T3 reports as installed.
 
 `factory config set` validates `harness` against installed harnesses and
 `model` against the configured harness when T3's catalog is available; if it
 is not, values are stored as given.
+
+`ISSUE_FACTORY_HARNESS` and `ISSUE_FACTORY_MODEL` override the configured
+values for a single process (for example the systemd unit in
+`service.example`).
 
 ## More
 

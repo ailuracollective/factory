@@ -37,8 +37,6 @@ enum Commands {
     Doctor,
     /// List harnesses installed in T3 Code
     Harnesses,
-    /// List model providers of a harness
-    Providers { harness: String },
     /// List models of a harness
     Models { harness: String },
     /// Get/set default config
@@ -60,22 +58,47 @@ enum Commands {
     Status,
     /// Show daemon logs (deprecated: use `daemon logs`)
     #[command(hide = true)]
-    Logs { #[arg(short, long)] follow: bool, #[arg(short = 'n', long, default_value = "50")] lines: u32 },
+    Logs {
+        #[arg(short, long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: u32,
+    },
     /// Run the webhook listener (deprecated: use `gateway listen`)
     #[command(hide = true)]
-    Listen { #[arg(long)] port: Option<u16> },
+    Listen {
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Register this runner (deprecated: use `gateway connect`)
     #[command(hide = true)]
-    Connect { gateway: String, runner: String, #[arg(long)] bootstrap_secret: Option<String> },
+    Connect {
+        gateway: String,
+        runner: String,
+        #[arg(long)]
+        bootstrap_secret: Option<String>,
+    },
     /// Run as connected runner (deprecated: use `gateway runner`)
     #[command(hide = true)]
-    Runner { #[arg(long)] once: bool },
+    Runner {
+        #[arg(long)]
+        once: bool,
+    },
     /// Launch agent for issue (deprecated: use `agent run`)
     #[command(hide = true)]
-    Test { repo: String, issue: u64, #[arg(long)] prompt: Option<String> },
+    Test {
+        repo: String,
+        issue: u64,
+        #[arg(long)]
+        prompt: Option<String>,
+    },
     /// Launch agent with prompt (deprecated: use `agent prompt`)
     #[command(hide = true)]
-    Run { repo: String, #[arg(long)] prompt: String },
+    Run {
+        repo: String,
+        #[arg(long)]
+        prompt: String,
+    },
     /// Cancel a running or queued execution
     Cancel {
         /// Execution ID (preferred)
@@ -116,7 +139,12 @@ enum ConfigAction {
     /// Get current defaults
     Get,
     /// Set a default value
-    Set { key: String, value: String, #[arg(short = 'g', long)] global: bool },
+    Set {
+        key: String,
+        value: String,
+        #[arg(short = 'g', long)]
+        global: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -163,7 +191,6 @@ fn main() -> ExitCode {
         } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
         Commands::Harnesses => cli::harnesses(),
-        Commands::Providers { harness } => cli::providers(&harness),
         Commands::Models { harness } => cli::models(&harness),
         Commands::Config { action } => match action {
             ConfigAction::Get => cli::config_get(),

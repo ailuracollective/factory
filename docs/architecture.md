@@ -11,7 +11,8 @@
 
 Local daemon + manual commands. Three modes:
 
-- Local mode (existing): webhooks direct to machine, T3 agent launch.
+- Local mode (existing): webhooks direct to machine, T3 agent launch with the
+  configured harness + model (`defaults.harness`, `defaults.model`).
 - Mentions: `factory listen` handles mention webhooks in real time
   (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`).
   Parsing, authorization, dedup and dispatch live in `apps/cli/src/mentions.rs`

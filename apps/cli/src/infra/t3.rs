@@ -11,13 +11,6 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
-pub struct Model {
-    pub slug: String,
-    /// Model provider inside the harness (e.g. `openai`, `opencode-go`).
-    pub provider: Option<String>,
-}
-
-#[derive(Debug, Clone)]
 pub struct Harness {
     /// Provider instance id accepted by `t3 thread start --provider`.
     pub name: String,
@@ -25,7 +18,8 @@ pub struct Harness {
     pub display_name: String,
     pub version: Option<String>,
     pub status: String,
-    pub models: Vec<Model>,
+    /// Model slugs accepted by the harness.
+    pub models: Vec<String>,
 }
 
 fn t3_home() -> PathBuf {
@@ -74,18 +68,7 @@ fn parse_cache(data: &str) -> Option<Harness> {
         .map(|models| {
             models
                 .iter()
-                .filter_map(|m| {
-                    let slug = m.get("slug").and_then(Value::as_str)?.to_string();
-                    let provider = slug
-                        .split_once('/')
-                        .map(|(p, _)| p.to_string())
-                        .or_else(|| {
-                            m.get("subProvider")
-                                .and_then(Value::as_str)
-                                .map(str::to_string)
-                        });
-                    Some(Model { slug, provider })
-                })
+                .filter_map(|m| Some(m.get("slug").and_then(Value::as_str)?.to_string()))
                 .collect()
         })
         .unwrap_or_default();
@@ -116,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_installed_harness_and_model_providers() {
+    fn parses_installed_harness_and_models() {
         let cache = r#"{
             "instanceId": "opencode",
             "driver": "opencode",
@@ -135,12 +118,10 @@ mod tests {
         assert_eq!(h.display_name, "OpenCode");
         assert_eq!(h.version.as_deref(), Some("2.3.2"));
         assert_eq!(h.status, "ready");
-        let providers: Vec<_> = h
-            .models
-            .iter()
-            .map(|m| m.provider.as_deref().unwrap_or(""))
-            .collect();
-        assert_eq!(providers, ["opencode-go", "openai", "pi"]);
+        assert_eq!(
+            h.models,
+            ["opencode-go/beam-free", "openai/gpt-6", "default"]
+        );
     }
 
     #[test]

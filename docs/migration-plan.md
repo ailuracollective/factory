@@ -38,4 +38,4 @@
 ## Compatibility
 
 - Keep local listener and commands.
-- No forced migration of config; new keys added with defaults.
+- Config keys are additive with defaults, except `defaults.provider` was replaced by `defaults.harness` (the T3 Code provider instance). Old `provider` values are ignored; run `factory config set -g harness <harness>` once per machine.

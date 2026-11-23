@@ -418,25 +418,6 @@ fn cached_default_harness() -> Option<String> {
     Some(crate::t3::resolve_harness(&configured))
 }
 
-pub fn providers(harness: &str) -> Result<()> {
-    let name = crate::t3::resolve_harness(harness);
-    let Some(h) = crate::t3::harness(&name) else {
-        println!(
-            "Unknown harness: {}. Available: {}",
-            name,
-            available_harnesses()
-        );
-        return Ok(());
-    };
-    let mut providers: Vec<String> = h.models.iter().filter_map(|m| m.provider.clone()).collect();
-    providers.sort();
-    providers.dedup();
-    for p in providers {
-        println!("{}", p);
-    }
-    Ok(())
-}
-
 pub fn models(harness: &str) -> Result<()> {
     let name = crate::t3::resolve_harness(harness);
     let Some(h) = crate::t3::harness(&name) else {
@@ -448,7 +429,7 @@ pub fn models(harness: &str) -> Result<()> {
         return Ok(());
     };
     for m in h.models {
-        println!("{}", m.slug);
+        println!("{}", m);
     }
     Ok(())
 }
@@ -652,7 +633,7 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
             let harness = crate::t3::harness(&cfg.defaults.harness);
             if let Some(h) = &harness
                 && !h.models.is_empty()
-                && !h.models.iter().any(|m| m.slug == value)
+                && !h.models.iter().any(|m| m == value)
             {
                 println!(
                     "Unknown model for {}: {}. Use 'factory models {}' to list.",

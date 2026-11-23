@@ -22,7 +22,6 @@ fn default_max_attempts() -> u32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Defaults {
-    /// Agent harness passed to T3 (`--provider`).
     #[serde(default)]
     pub harness: String,
     #[serde(default)]
