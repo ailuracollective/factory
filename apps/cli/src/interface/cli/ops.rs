@@ -113,7 +113,11 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
     }
     // build a minimal issue-like object
     let issue = serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
-    let key = format!("{}#0", repo_entry.github);
+    let key = format!(
+        "{}#prompt#{}",
+        repo_entry.github,
+        crate::execution::new_execution_id()
+    );
     let exec = Some(crate::execution::create_execution(
         &key,
         &repo_entry.github,
@@ -606,7 +610,11 @@ pub fn agent_run(
         let p = prompt.unwrap_or("");
         let issue =
             serde_json::json!({"number": 0, "title": "custom prompt", "url": "", "labels": []});
-        let key = format!("{}#0", repo_entry.github);
+        let key = format!(
+            "{}#prompt#{}",
+            repo_entry.github,
+            crate::execution::new_execution_id()
+        );
         let exec = crate::execution::create_execution(
             &key,
             &repo_entry.github,
