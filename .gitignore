@@ -6,3 +6,6 @@ state.json
 node_modules/
 target/
 .dev.vars
+.vscode/
+apps/gateway/package.json
+internal/notifications/Cargo.lock
