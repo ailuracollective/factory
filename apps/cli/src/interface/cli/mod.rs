@@ -486,13 +486,43 @@ pub use runner_cmd::runner;
 #[cfg(test)]
 mod tests;
 
-pub fn harnesses() -> Result<()> {
+pub fn harnesses(json: bool) -> Result<()> {
+    use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
     let installed = crate::t3::harnesses();
+    let configured = cached_default_harness();
+    if json {
+        #[derive(serde::Serialize)]
+        struct HarnessDto {
+            name: String,
+            display_name: String,
+            version: Option<String>,
+            status: String,
+            configured_default: bool,
+            models: Vec<String>,
+        }
+        let data: Vec<HarnessDto> = installed
+            .iter()
+            .map(|h| HarnessDto {
+                name: h.name.clone(),
+                display_name: h.display_name.clone(),
+                version: h.version.clone(),
+                status: h.status.clone(),
+                configured_default: configured.as_deref() == Some(h.name.as_str()),
+                models: h.models.clone(),
+            })
+            .collect();
+        let env = OutputEnvelope::new(data).with_meta(OutputMeta {
+            count: Some(installed.len()),
+            limit: None,
+            next_cursor: None,
+        });
+        println!("{}", to_json(&env).unwrap());
+        return Ok(());
+    }
     if installed.is_empty() {
         println!("No installed harnesses found. Start T3 Code once so it can probe them.");
         return Ok(());
     }
-    let configured = cached_default_harness();
     let name_w = installed.iter().map(|h| h.name.len()).max().unwrap_or(0);
     let display_w = installed
         .iter()
@@ -527,16 +557,55 @@ fn cached_default_harness() -> Option<String> {
     Some(crate::t3::resolve_harness(&configured))
 }
 
-pub fn models(harness: &str) -> Result<()> {
+pub fn models(harness: &str, json: bool) -> Result<()> {
+    use crate::interface::output::{OutputEnvelope, OutputError, OutputMeta, to_json};
     let name = crate::t3::resolve_harness(harness);
     let Some(h) = crate::t3::harness(&name) else {
-        println!(
-            "Unknown harness: {}. Available: {}",
-            name,
-            available_harnesses()
-        );
-        return Ok(());
+        if json {
+            let env = OutputError::new(
+                "NOT_FOUND",
+                format!(
+                    "Unknown harness: {}. Available: {}",
+                    name,
+                    available_harnesses()
+                ),
+            );
+            println!("{}", to_json(&env).unwrap());
+        } else {
+            eprintln!(
+                "Unknown harness: {}. Available: {}",
+                name,
+                available_harnesses()
+            );
+        }
+        anyhow::bail!("unknown harness: {}", name);
     };
+    if json {
+        #[derive(serde::Serialize)]
+        struct ModelDto {
+            slug: String,
+        }
+        #[derive(serde::Serialize)]
+        struct ModelsDto {
+            harness: String,
+            models: Vec<ModelDto>,
+        }
+        let data = ModelsDto {
+            harness: h.name.clone(),
+            models: h
+                .models
+                .iter()
+                .map(|m| ModelDto { slug: m.clone() })
+                .collect(),
+        };
+        let env = OutputEnvelope::new(data).with_meta(OutputMeta {
+            count: Some(h.models.len()),
+            limit: None,
+            next_cursor: None,
+        });
+        println!("{}", to_json(&env).unwrap());
+        return Ok(());
+    }
     for m in h.models {
         println!("{}", m);
     }
