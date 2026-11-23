@@ -127,6 +127,28 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Manage executions
+    Execution {
+        #[command(subcommand)]
+        action: ExecutionAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExecutionAction {
+    /// List executions
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        issue: Option<u64>,
+        #[arg(long, default_value = "20")]
+        limit: u64,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -248,6 +270,15 @@ fn main() -> ExitCode {
             force,
             json,
         ),
+        Commands::Execution { action } => match action {
+            ExecutionAction::List {
+                status,
+                repo,
+                issue,
+                limit,
+                json,
+            } => cli::execution_list(status.as_deref(), repo.as_deref(), issue, limit, json),
+        },
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

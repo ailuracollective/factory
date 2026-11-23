@@ -356,3 +356,91 @@ pub(crate) fn encode_path_segment(s: &str) -> String {
     }
     out
 }
+
+pub fn execution_list(
+    status: Option<&str>,
+    repo: Option<&str>,
+    issue: Option<u64>,
+    limit: u64,
+    json: bool,
+) -> Result<()> {
+    // validation
+    if issue.is_some() && repo.is_none() {
+        anyhow::bail!("--issue requires --repo");
+    }
+    if limit == 0 || limit > 200 {
+        anyhow::bail!("--limit must be between 1 and 200");
+    }
+    if let Some(s) = status {
+        let valid = [
+            "queued",
+            "running",
+            "cancelling",
+            "cancelled",
+            "completed",
+            "failed",
+        ];
+        if !valid.contains(&s) {
+            anyhow::bail!("invalid status: {s}");
+        }
+    }
+    let recs =
+        crate::execution::list_executions_filtered(repo, status, issue.map(|v| v as i64), limit)?;
+    if json {
+        use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
+        #[derive(serde::Serialize)]
+        struct ExecutionListItem {
+            execution_id: String,
+            status: String,
+            repo: String,
+            issue: i64,
+            attempt: u32,
+            runner: Option<String>,
+            started_at: u64,
+            ended_at: Option<u64>,
+            updated_at: u64,
+        }
+        let data: Vec<ExecutionListItem> = recs
+            .iter()
+            .map(|r| ExecutionListItem {
+                execution_id: r.execution_id.clone(),
+                status: r.status.as_str().to_string(),
+                repo: r.repo.clone(),
+                issue: r.issue_number,
+                attempt: r.attempt,
+                runner: r.runner.clone().or(r.requester.clone()),
+                started_at: r.started_at,
+                ended_at: r.ended_at,
+                updated_at: r.updated_at,
+            })
+            .collect();
+        let count = data.len();
+        let env = OutputEnvelope::new(data).with_meta(OutputMeta {
+            count: Some(count),
+            limit: Some(limit as usize),
+            next_cursor: None,
+        });
+        println!("{}", to_json(&env).unwrap());
+    } else {
+        if recs.is_empty() {
+            println!("No executions found.");
+            return Ok(());
+        }
+        println!(
+            "{:<40} {:<12} {:<28} {:<8} {:<8} RUNNER/ORIGIN",
+            "EXECUTION", "STATUS", "REPO", "ISSUE", "ATTEMPT"
+        );
+        for r in &recs {
+            println!(
+                "{:<40} {:<12} {:<28} {:<8} {:<8} {}",
+                r.execution_id,
+                r.status.as_str(),
+                r.repo,
+                r.issue_number,
+                r.attempt,
+                r.runner.clone().or(r.requester.clone()).unwrap_or_default()
+            );
+        }
+    }
+    Ok(())
+}

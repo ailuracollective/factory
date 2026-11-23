@@ -574,7 +574,7 @@ mod ops;
 pub mod runner_cmd;
 
 pub(crate) use ops::encode_path_segment;
-pub use ops::{cancel, connect, run_prompt, test};
+pub use ops::{cancel, connect, execution_list, run_prompt, test};
 pub use runner_cmd::runner;
 
 #[cfg(test)]
