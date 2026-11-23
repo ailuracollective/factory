@@ -103,10 +103,7 @@ impl IssueStatus {
         use IssueStatus::*;
         matches!(
             (self, to),
-            (Pending, Running)
-                | (Running, Completed)
-                | (Running, Failed)
-                | (Failed, Pending)
+            (Pending, Running) | (Running, Completed) | (Running, Failed) | (Failed, Pending)
         )
     }
 
