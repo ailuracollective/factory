@@ -530,20 +530,76 @@ pub fn daemon_run(mode: &str, port: Option<u16>) -> Result<()> {
     }
 }
 
-pub fn status(json: bool) -> Result<()> {
+pub fn status(json: bool, verbose: bool) -> Result<()> {
     let (code, msg) = run(&["systemctl", "--user", "is-active", "factory"]);
-    // Distinguish active/inactive/unknown; a failure to query systemd is an error.
-    let daemon_state = match (code, msg.trim()) {
+    let systemd_state = match (code, msg.trim()) {
         (0, "active") => "active",
         (_, "inactive") => "inactive",
         (3, _) => "inactive",
+        (_, "failed") => "failed",
         (_, "active") => "active",
         _ if code == 127 => {
             anyhow::bail!("failed to query systemd: {}", msg);
         }
         _ => "unknown",
     };
+    // failed state detection via show
+    let show = run(&[
+        "systemctl",
+        "--user",
+        "show",
+        "factory",
+        "--property=ActiveState,MainPID,ActiveEnterTimestamp",
+    ]);
+    let mut pid: Option<u32> = None;
+    let mut active_state = systemd_state.to_string();
+    let mut active_since: Option<String> = None;
+    for line in show.1.lines() {
+        if let Some(v) = line.strip_prefix("ActiveState=") {
+            if v == "failed" {
+                active_state = "failed".to_string();
+            } else if v == "inactive" && active_state != "active" {
+                active_state = "inactive".to_string();
+            } else if v == "active" {
+                active_state = "active".to_string();
+            }
+        } else if let Some(v) = line.strip_prefix("MainPID=") {
+            if let Ok(n) = v.parse::<u32>()
+                && n != 0
+            {
+                pid = Some(n);
+            }
+        } else if let Some(v) = line.strip_prefix("ActiveEnterTimestamp=")
+            && !v.trim().is_empty()
+            && v.trim() != "n/a"
+        {
+            active_since = Some(v.trim().to_string());
+        }
+    }
+    let systemd_state = active_state.as_str();
+
     let config = load_config()?;
+    // runtime health
+    let runtime_health = if systemd_state == "active" {
+        let url = format!("http://127.0.0.1:{}/health", config.webhook.port);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .ok();
+        match client.and_then(|c| c.get(&url).send().ok()) {
+            Some(resp) if resp.status().is_success() => "healthy",
+            Some(_) => "degraded",
+            None => "unreachable",
+        }
+    } else {
+        "unknown"
+    };
+    let operation_state = if runtime_health == "healthy" {
+        "running"
+    } else {
+        "stopped"
+    };
+
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         #[derive(serde::Serialize)]
@@ -554,10 +610,18 @@ pub fn status(json: bool) -> Result<()> {
         }
         #[derive(serde::Serialize)]
         struct StatusDto {
-            daemon: String,
+            systemd_state: String,
+            runtime_health: String,
+            operation_state: String,
             repos_count: usize,
             repos: Vec<RepoSummary>,
             funnel_url: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pid: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            uptime_since: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            version: Option<String>,
         }
         let repos: Vec<RepoSummary> = config
             .repos
@@ -569,16 +633,27 @@ pub fn status(json: bool) -> Result<()> {
             })
             .collect();
         let dto = StatusDto {
-            daemon: daemon_state.to_string(),
+            systemd_state: systemd_state.to_string(),
+            runtime_health: runtime_health.to_string(),
+            operation_state: operation_state.to_string(),
             repos_count: config.repos.len(),
             repos,
             funnel_url: config.webhook.funnel_url.clone(),
+            pid: if verbose { pid } else { None },
+            uptime_since: if verbose { active_since } else { None },
+            version: if verbose {
+                Some(env!("CARGO_PKG_VERSION").to_string())
+            } else {
+                None
+            },
         };
         let env = OutputEnvelope::new(dto);
         println!("{}", to_json(&env).unwrap());
         return Ok(());
     }
-    println!("Daemon: {}", daemon_state);
+    println!("Systemd: {}", systemd_state);
+    println!("Runtime: {}", runtime_health);
+    println!("Operation: {}", operation_state);
     println!("Repos: {}", config.repos.len());
     for repo in &config.repos {
         println!(
@@ -589,6 +664,15 @@ pub fn status(json: bool) -> Result<()> {
     let url = &config.webhook.funnel_url;
     if !url.is_empty() {
         println!("Funnel: {}", url);
+    }
+    if verbose {
+        if let Some(p) = pid {
+            println!("PID: {}", p);
+        }
+        if let Some(s) = active_since {
+            println!("Active since: {}", s);
+        }
+        println!("Version: {}", env!("CARGO_PKG_VERSION"));
     }
     Ok(())
 }
