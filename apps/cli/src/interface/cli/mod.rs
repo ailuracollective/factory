@@ -1,4 +1,7 @@
-use crate::config::{Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config, save_config};
+use crate::config::{
+    Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config,
+    save_config,
+};
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -23,7 +26,9 @@ pub(super) fn run(cmd: &[&str]) -> (i32, String) {
 
 pub fn init(force: bool, local: bool) -> Result<()> {
     if local {
-        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("factory.json");
         if path.exists() && !force {
             println!("factory.json already exists. Use --force to overwrite.");
             return Ok(());
@@ -465,7 +470,10 @@ pub fn config_get() -> Result<()> {
     println!("max_attempts: {}", cfg.defaults.max_attempts);
     println!("mentions.enabled: {}", cfg.mentions.enabled);
     println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
-    println!("mentions.usernames_extra: {}", cfg.mentions.usernames_extra.join(", "));
+    println!(
+        "mentions.usernames_extra: {}",
+        cfg.mentions.usernames_extra.join(", ")
+    );
     println!("mentions.command: {}", cfg.mentions.command);
     println!("mentions.daily_quota: {}", cfg.mentions.daily_quota);
     println!("mentions.report: {}", cfg.mentions.report);
@@ -499,14 +507,27 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         Vec::new()
     };
     if !global {
-        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("factory.json");
         let mut fc: FactoryRepoConfig = if path.exists() {
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default())
+                .unwrap_or_default()
         } else {
             FactoryRepoConfig::default()
         };
-        if fc.defaults.is_none() { fc.defaults = Some(Defaults { provider: String::new(), model: String::new(), base_branch: String::new(), label: String::new(), max_attempts: 0 }); }
-        if fc.mentions.is_none() { fc.mentions = Some(MentionsConfig::default()); }
+        if fc.defaults.is_none() {
+            fc.defaults = Some(Defaults {
+                provider: String::new(),
+                model: String::new(),
+                base_branch: String::new(),
+                label: String::new(),
+                max_attempts: 0,
+            });
+        }
+        if fc.mentions.is_none() {
+            fc.mentions = Some(MentionsConfig::default());
+        }
         let d = fc.defaults.as_mut().unwrap();
         let m = fc.mentions.as_mut().unwrap();
         match key {
@@ -514,15 +535,53 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
             "model" => d.model = value.to_string(),
             "base_branch" => d.base_branch = value.to_string(),
             "label" => d.label = value.to_string(),
-            "max_attempts" => { if let Ok(n)=value.parse(){ d.max_attempts=n; } else { println!("Invalid number: {}", value); return Ok(());} }
-            "mentions.enabled" => m.enabled = value=="true"||value=="1",
-            "mentions.usernames" => { m.usernames = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
+            "max_attempts" => {
+                if let Ok(n) = value.parse() {
+                    d.max_attempts = n;
+                } else {
+                    println!("Invalid number: {}", value);
+                    return Ok(());
+                }
+            }
+            "mentions.enabled" => m.enabled = value == "true" || value == "1",
+            "mentions.usernames" => {
+                m.usernames = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
             "mentions.command" => m.command = value.to_string(),
-            "mentions.allowed_authors" => { m.allowed_authors = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
-            "mentions.daily_quota" => { if let Ok(n)=value.parse(){ m.daily_quota=n; } else { println!("Invalid number: {}", value); return Ok(());} }
-            "mentions.report" => m.report = value=="true"||value=="1",
-            "mentions.usernames_extra" => { m.usernames_extra = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
-            _ => { println!("Unknown key."); return Ok(()); }
+            "mentions.allowed_authors" => {
+                m.allowed_authors = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            "mentions.daily_quota" => {
+                if let Ok(n) = value.parse() {
+                    m.daily_quota = n;
+                } else {
+                    println!("Invalid number: {}", value);
+                    return Ok(());
+                }
+            }
+            "mentions.report" => m.report = value == "true" || value == "1",
+            "mentions.usernames_extra" => {
+                m.usernames_extra = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            _ => {
+                println!("Unknown key.");
+                return Ok(());
+            }
         }
         std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
         println!("Set {} = {} (local)", key, value);
@@ -568,7 +627,12 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         "mentions.enabled" => cfg.mentions.enabled = value == "true" || value == "1",
         "mentions.command" => cfg.mentions.command = value.to_string(),
         "mentions.allowed_authors" => {
-            cfg.mentions.allowed_authors = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            cfg.mentions.allowed_authors = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
         }
         "mentions.daily_quota" => {
             if let Ok(n) = value.parse() {
@@ -580,7 +644,12 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         }
         "mentions.report" => cfg.mentions.report = value == "true" || value == "1",
         "mentions.usernames_extra" => {
-            cfg.mentions.usernames_extra = value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+            cfg.mentions.usernames_extra = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
         }
         "mentions.usernames" => {
             cfg.mentions.usernames = value
@@ -591,7 +660,10 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
                 .collect();
         }
         _ => {
-            println!("Unknown key: {}. Use 'provider', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.", key);
+            println!(
+                "Unknown key: {}. Use 'provider', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.",
+                key
+            );
             return Ok(());
         }
     }
