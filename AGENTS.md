@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 Ailura Factory is a monorepo for AI-assisted development automation.
 
-- `apps/cli` — Rust CLI (`cli`), runs agents locally (T3 Code today).
+- `apps/cli` — Rust CLI (`factory`, shortcut `afc`), runs agents locally (T3 Code today).
 - `apps/gateway` — Rust Cloudflare Worker (GitHub App gateway, D1 persistence).
 - `apps/bot` — Rust bot for chat notifications.
 - `internal/notifications` — Shared notification contract.
@@ -23,6 +23,7 @@ cargo test -p cli
 ```
 
 Gateway (wasm32):
+
 ```bash
 cargo clippy -p gateway --target wasm32-unknown-unknown -- -D warnings
 cargo build -p gateway --target wasm32-unknown-unknown --release

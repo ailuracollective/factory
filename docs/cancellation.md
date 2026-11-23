@@ -5,9 +5,9 @@ Factory supports safe, per-execution cancellation for local CLI, GitHub mentions
 ## Command contract
 
 ```text
-cli cancel <execution-id> [--force]
-cli cancel --repo <owner/repo> --issue <number> [--force]
-cli cancel --repo <owner/repo> --pr <number> [--force]
+factory cancel <execution-id> [--force]
+factory cancel --repo <owner/repo> --issue <number> [--force]
+factory cancel --repo <owner/repo> --pr <number> [--force]
 
 @<configured-github-login> cancel [execution-id]
 ```
@@ -16,7 +16,7 @@ cli cancel --repo <owner/repo> --pr <number> [--force]
 - Default cancellation targets one execution. Bulk/cascading cancellation is out of scope.
 - `--force` first requests normal termination, then escalates after 10 seconds (SIGTERM/SIGKILL for Unix process groups; `taskkill /T` then `/F` for Windows process trees). Other platforms can terminate only the directly owned child process. It does not reset/clean worktrees, delete branches, or delete/close PRs.
 - Repeated requests are idempotent and report existing cancellation state.
-- `cli stop` remains daemon control; it does not cancel individual executions.
+- `factory stop` remains daemon control; it does not cancel individual executions.
 
 ## Behavior
 
@@ -26,7 +26,7 @@ cli cancel --repo <owner/repo> --pr <number> [--force]
 
 ## Authorization
 
-- CLI: local operator invoking `cli cancel`.
+- CLI: local operator invoking `factory cancel`.
 - GitHub mentions: original execution requester or explicitly authorized mention admins (`mentions.usernames` / `mentions.allowed_authors`). Repository write permission alone is not sufficient.
 - Gateway admin routes: existing `x-admin-token` guard; fail-closed behavior preserved.
 

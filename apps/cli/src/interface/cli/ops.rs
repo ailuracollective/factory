@@ -162,18 +162,18 @@ pub fn cancel(
     pr: Option<u64>,
     force: bool,
 ) -> Result<()> {
-    let actor = std::env::var("USER").unwrap_or_else(|_| "cli".to_string());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "factory".to_string());
     let target = resolve_cancel_target(execution_id, repo, issue, pr)?;
     let rec = crate::execution::request_cancel(
         &target,
-        &format!("cli:{actor}"),
+        &format!("factory:{actor}"),
         force,
-        Some("cli cancel"),
+        Some("factory cancel"),
     )?;
     let _ = crate::agent::cancel_running_execution(&target, force);
     let _ = crate::execution::append_audit(crate::execution::ExecutionAuditEvent {
         ts: crate::state::now(),
-        actor: format!("cli:{actor}"),
+        actor: format!("factory:{actor}"),
         action: if force {
             "cancel_force".to_string()
         } else {

@@ -7,43 +7,43 @@ Written in Rust. Runs locally on your machine — no cloud hosting required.
 
 ```bash
 cargo build -p cli --release
-# binary: target/release/cli
-cp target/release/cli ~/.local/bin/cli
+# binaries: target/release/factory, target/release/afc (shortcut)
+cp target/release/factory target/release/afc ~/.local/bin/
 ```
 
 ## Quick start
 
 ```bash
-cli init                    # create config, generate secret
-cli doctor                  # verify dependencies
-cli repo add /path/to/repo  # register a repo
+factory init                    # create config, generate secret
+factory doctor                  # verify dependencies
+factory repo add /path/to/repo  # register a repo
 tailscale funnel --bg 8787      # expose webhook
-cli start                   # start daemon
+factory start                   # start daemon
 ```
 
 Then create a webhook in each repo (Settings → Webhooks) pointing to your funnel URL
-with the secret from `cli init`.
+with the secret from `factory init`.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `cli init [--force]` | Initialize factory config |
-| `cli repo add <path>` | Register an existing repo (labels, T3, webhook) |
-| `cli repo list` | List repos |
-| `cli repo remove <name>` | Unregister a repo |
-| `cli repo sync <name>` | Re-apply labels from standards |
-| `cli start` | Start daemon |
-| `cli stop` | Stop daemon |
-| `cli restart` | Restart daemon |
-| `cli status` | Show status |
-| `cli secret rotate` | Rotate webhook secret |
-| `cli logs [-f] [-n N]` | Show/follow daemon logs |
-| `cli doctor` | Run diagnostics |
-| `cli test <repo> <issue#> [--prompt "..."]` | Manually launch an agent for an issue (optional custom prompt) |
-| `cli run <repo> --prompt "..."` | Launch an agent with a custom prompt (no issue) |
-| `cli listen [--port N]` | Run webhook listener in foreground |
-| `cli mentions [--once] [--interval N]` | Poll GitHub for configured mentions and dispatch work |
+| `factory init [--force]` | Initialize factory config |
+| `factory repo add <path>` | Register an existing repo (labels, T3, webhook) |
+| `factory repo list` | List repos |
+| `factory repo remove <name>` | Unregister a repo |
+| `factory repo sync <name>` | Re-apply labels from standards |
+| `factory start` | Start daemon |
+| `factory stop` | Stop daemon |
+| `factory restart` | Restart daemon |
+| `factory status` | Show status |
+| `factory secret rotate` | Rotate webhook secret |
+| `factory logs [-f] [-n N]` | Show/follow daemon logs |
+| `factory doctor` | Run diagnostics |
+| `factory test <repo> <issue#> [--prompt "..."]` | Manually launch an agent for an issue (optional custom prompt) |
+| `factory run <repo> --prompt "..."` | Launch an agent with a custom prompt (no issue) |
+| `factory listen [--port N]` | Run webhook listener in foreground |
+| `factory mentions [--once] [--interval N]` | Poll GitHub for configured mentions and dispatch work |
 
 ## How it works
 
@@ -53,8 +53,8 @@ with the secret from `cli init`.
 4. The agent implements, tests, and opens a pull request (does not merge).
 
 Alternatively, mentions can be handled in real time via webhooks through
-`cli listen` (recommended when webhooks are configured) or by polling with
-`cli mentions` (no public endpoint needed). See
+`factory listen` (recommended when webhooks are configured) or by polling with
+`factory mentions` (no public endpoint needed). See
 [docs/mentions.md](docs/mentions.md).
 
 ## Requirements
@@ -66,7 +66,7 @@ Alternatively, mentions can be handled in real time via webhooks through
 
 ## Configuration
 
-Config lives at `~/.config/ailuracollective/factory/config.json`. See `cli init`.
+Config lives at `~/.config/ailuracollective/factory/config.json`. See `factory init`.
 Mention triggers are documented in [docs/mentions.md](docs/mentions.md).
 
 ## License

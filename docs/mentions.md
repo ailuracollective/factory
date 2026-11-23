@@ -8,7 +8,7 @@ not notify).
 ## Configuration
 
 Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
-(the file created by `cli init`):
+(the file created by `factory init`):
 
 ```json
 {
@@ -38,7 +38,7 @@ Add a `mentions` block to `~/.config/ailuracollective/factory/config.json`
 
 Invocation syntax (with the default command):
 
-```
+```text
 @your-github-login factory implement this
 ```
 
@@ -49,7 +49,7 @@ executed as a shell command.
 
 ## Usage
 
-Webhook mode (recommended when you already run `cli listen`): `cli listen`
+Webhook mode (recommended when you already run `factory listen`): `factory listen`
 now also processes `issue_comment`, `issues`, and `pull_request` mention events in
 real time, reusing the same parser, authorization, dedup, and dispatch logic. No
 polling delay.
@@ -57,14 +57,14 @@ polling delay.
 Polling fallback (no public webhook endpoint needed):
 
 ```bash
-cli mentions --once        # one poll (useful for cron/tests)
-cli mentions               # poll continuously
-cli mentions --interval 120
+factory mentions --once        # one poll (useful for cron/tests)
+factory mentions               # poll continuously
+factory mentions --interval 120
 ```
 
 ```ini
 [Service]
-ExecStart=%h/.local/bin/cli mentions
+ExecStart=%h/.local/bin/factory mentions
 Restart=on-failure
 ```
 
@@ -72,7 +72,7 @@ Restart=on-failure
 
 An event is accepted only when all of these hold:
 
-1. The repository is registered and enabled (`cli repo add`, `cli repo
+1. The repository is registered and enabled (`factory repo add`, `factory repo
    list`). Repositories outside the allowlist are rejected.
 2. The event author is authorized: they are a configured trigger username, an
    `allowed_authors` entry, or have `admin`, `maintain` or `write` permission on
@@ -131,7 +131,7 @@ new GitHub App or bot account is required.
 - Requests from pull request conversation comments are dispatched as an
   issue-style agent run with a note to inspect the PR; there is no special
   "update the existing PR branch" flow yet.
-- The standalone poller is a separate process, not part of `cli start`.
+- The standalone poller is a separate process, not part of `factory start`.
 - The authenticated `gh` user authors the report comments, so they look like
   the maintainer's own comments (they are marked and ignored as triggers).
 - A GitHub outage or missing `gh` auth skips that repository for the poll; the

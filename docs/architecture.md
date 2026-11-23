@@ -8,17 +8,21 @@
 ## Components
 
 ### Factory CLI (`apps/cli`)
+
 Local daemon + manual commands. Three modes:
+
 - Local mode (existing): webhooks direct to machine, T3 agent launch.
-- Mentions: `cli listen` handles mention webhooks in real time
+- Mentions: `factory listen` handles mention webhooks in real time
   (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`);
-  `cli mentions` provides polling fallback. Parsing, authorization, dedup and
+  `factory mentions` provides polling fallback. Parsing, authorization, dedup and
   dispatch live in `apps/cli/src/mentions.rs` behind `EventSource`/`Engine`, so a
   Gateway-backed source can replace polling without changing core logic.
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.
 
 ### Factory Gateway (`apps/gateway`)
+
 Cloudflare Worker (Rust, wasm32-unknown-unknown). Responsibilities:
+
 - GitHub App webhook receiver (signature verification).
 - Authorization policies per installation/repo/user.
 - Job persistence in D1.
@@ -26,7 +30,6 @@ Cloudflare Worker (Rust, wasm32-unknown-unknown). Responsibilities:
 - Admin API for dashboard.
 
 No Tokio/SQLx. Use `worker` crate, D1 bindings, async/await. Axum may be used via `http` feature for routing if needed; prefer `worker::Router` for simplicity.
-
 
 ## Data flow (MVP)
 

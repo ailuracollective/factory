@@ -6,7 +6,11 @@ description = "AI Factory: listens to GitHub issues and launches T3 Code agents 
 license.workspace = true
 
 [[bin]]
-name = "cli"
+name = "factory"
+path = "src/main.rs"
+
+[[bin]]
+name = "afc"
 path = "src/main.rs"
 
 [dependencies]

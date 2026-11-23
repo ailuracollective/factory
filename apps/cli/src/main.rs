@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(
-    name = "cli",
+    name = env!("CARGO_BIN_NAME"),
     version,
     about = "AI Factory CLI",
     disable_help_subcommand = true
