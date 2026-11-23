@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ailuracollective.github.io/factory/factory.schema.json",
+  "title": "Factory repo config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "base_branch": { "type": "string" },
+        "label": { "type": "string" },
+        "max_attempts": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "mentions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "usernames": { "type": "array", "items": { "type": "string" } },
+        "command": { "type": "string" },
+        "allowed_authors": { "type": "array", "items": { "type": "string" } },
+        "daily_quota": { "type": "integer", "minimum": 0 },
+        "report": { "type": "boolean" }
+      }
+    }
+  }
+}

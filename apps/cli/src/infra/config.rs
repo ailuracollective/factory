@@ -194,6 +194,20 @@ fn sync_projects_to_db(repos: &[RepoEntry]) {
     crate::state::sync_projects(repos);
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FactoryRepoConfig {
+    #[serde(default)]
+    pub defaults: Option<Defaults>,
+    #[serde(default)]
+    pub mentions: Option<MentionsConfig>,
+}
+
+pub fn load_factory_config(repo_path: &std::path::Path) -> Option<FactoryRepoConfig> {
+    let path = repo_path.join("factory.json");
+    let data = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
 pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
     config
         .repos
@@ -225,5 +239,19 @@ mod tests {
         assert!(!cfg.mentions.enabled);
         assert_eq!(cfg.mentions.command, "factory");
         assert!(cfg.mentions.report);
+    }
+
+    #[test]
+    fn factory_repo_config_loads() {
+        let dir = std::env::temp_dir().join("factory_repo_cfg_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("factory.json"),
+            r#"{"defaults":{"provider":"opencode","model":"m","base_branch":"develop","label":"ready","max_attempts":5}}"#,
+        )
+        .unwrap();
+        let cfg = load_factory_config(&dir).unwrap();
+        assert_eq!(cfg.defaults.unwrap().base_branch, "develop");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
