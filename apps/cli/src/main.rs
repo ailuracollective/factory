@@ -39,9 +39,16 @@ enum Commands {
         json: bool,
     },
     /// List harnesses installed in T3 Code
-    Harnesses,
+    Harnesses {
+        #[arg(long)]
+        json: bool,
+    },
     /// List models of a harness
-    Models { harness: String },
+    Models {
+        harness: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Get/set default config
     Config {
         #[command(subcommand)]
@@ -206,8 +213,8 @@ fn main() -> ExitCode {
             prompt,
         } => cli::test(&repo, issue, prompt),
         Commands::Run { repo, prompt } => cli::run_prompt(&repo, &prompt),
-        Commands::Harnesses => cli::harnesses(),
-        Commands::Models { harness } => cli::models(&harness),
+        Commands::Harnesses { json } => cli::harnesses(json),
+        Commands::Models { harness, json } => cli::models(&harness, json),
         Commands::Config { action } => match action {
             ConfigAction::Get { json } => cli::config_get(json),
             ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),
