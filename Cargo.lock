@@ -26,31 +26,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ailura-bot"
-version = "0.1.0"
-dependencies = [
- "ailura-notifications",
- "async-trait",
- "axum",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ailura-notifications"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "aliasable"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -501,6 +476,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bot"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "notifications",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -619,6 +609,32 @@ name = "clap_lex"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79"
+
+[[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "clap_complete",
+ "colored",
+ "dirs",
+ "hex",
+ "hmac 0.12.1",
+ "husky-rs",
+ "notifications",
+ "regex",
+ "reqwest",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "cmov"
@@ -972,50 +988,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "factory"
-version = "0.1.0"
-dependencies = [
- "ailura-notifications",
- "anyhow",
- "axum",
- "clap",
- "clap_complete",
- "colored",
- "dirs",
- "hex",
- "hmac 0.12.1",
- "husky-rs",
- "regex",
- "reqwest",
- "sea-orm",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "factory-gateway"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hex",
- "hmac 0.12.1",
- "js-sys",
- "ohkami",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "web-sys",
- "worker",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1155,6 +1127,24 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "gateway"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "hmac 0.12.1",
+ "js-sys",
+ "ohkami",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "web-sys",
+ "worker",
 ]
 
 [[package]]
@@ -1858,6 +1848,16 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
+]
+
+[[package]]
+name = "notifications"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

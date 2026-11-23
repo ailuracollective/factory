@@ -400,33 +400,33 @@ fn run_supervised_command(
     let force_after = Duration::from_secs(10);
 
     let status = loop {
-        if let Some(exec_id) = execution_id {
-            if execution::is_cancel_requested(exec_id) {
-                if cancel_seen_at.is_none() {
-                    cancel_seen_at = Some(std::time::Instant::now());
-                }
-                if !cancel_sent {
-                    let _ = signal_owned_process(&child, pgid, Signal::Term);
-                    cancel_sent = true;
-                }
-                let force_now = execution::get_execution(exec_id)
-                    .ok()
-                    .flatten()
-                    .and_then(|r| r.cancel_outcome.clone())
-                    .map(|o| o == "force_requested")
-                    .unwrap_or(false);
-                if force_now && !force_sent {
-                    let _ = signal_owned_process(&child, pgid, Signal::Kill);
-                    force_sent = true;
-                }
-                if !force_sent
-                    && cancel_seen_at
-                        .map(|t| t.elapsed() >= force_after)
-                        .unwrap_or(false)
-                {
-                    let _ = signal_owned_process(&child, pgid, Signal::Kill);
-                    force_sent = true;
-                }
+        if let Some(exec_id) = execution_id
+            && execution::is_cancel_requested(exec_id)
+        {
+            if cancel_seen_at.is_none() {
+                cancel_seen_at = Some(std::time::Instant::now());
+            }
+            if !cancel_sent {
+                let _ = signal_owned_process(&child, pgid, Signal::Term);
+                cancel_sent = true;
+            }
+            let force_now = execution::get_execution(exec_id)
+                .ok()
+                .flatten()
+                .and_then(|r| r.cancel_outcome.clone())
+                .map(|o| o == "force_requested")
+                .unwrap_or(false);
+            if force_now && !force_sent {
+                let _ = signal_owned_process(&child, pgid, Signal::Kill);
+                force_sent = true;
+            }
+            if !force_sent
+                && cancel_seen_at
+                    .map(|t| t.elapsed() >= force_after)
+                    .unwrap_or(false)
+            {
+                let _ = signal_owned_process(&child, pgid, Signal::Kill);
+                force_sent = true;
             }
         }
 
@@ -450,18 +450,18 @@ fn run_supervised_command(
     let stdout = stdout_handle.join().unwrap_or_default();
     let stderr = stderr_handle.join().unwrap_or_default();
 
-    if let Some(exec_id) = execution_id {
-        if execution::is_cancel_requested(exec_id) {
-            let _ = execution::mark_cancel_confirmed(
-                exec_id,
-                if force_sent {
-                    "force_killed"
-                } else {
-                    "cancelled"
-                },
-            );
-            return Err("execution cancelled".to_string());
-        }
+    if let Some(exec_id) = execution_id
+        && execution::is_cancel_requested(exec_id)
+    {
+        let _ = execution::mark_cancel_confirmed(
+            exec_id,
+            if force_sent {
+                "force_killed"
+            } else {
+                "cancelled"
+            },
+        );
+        return Err("execution cancelled".to_string());
     }
 
     // Reap: child already exited; drop handle.
@@ -545,7 +545,8 @@ mod tests {
             uuid::Uuid::now_v7().simple()
         ));
         let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
 
         let script = std::env::temp_dir().join(format!("factory_sleep_{}.sh", std::process::id()));
         std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
@@ -554,7 +555,8 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap()) };
 
         let config = crate::config::Config::default();
         let issue = serde_json::json!({"number": 1, "title": "t", "url": "u"});
@@ -593,7 +595,9 @@ mod tests {
 
         let _ = std::fs::remove_file(&script);
         let _ = std::fs::remove_file(&tmp);
-        std::env::remove_var("ISSUE_FACTORY_T3");
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 }

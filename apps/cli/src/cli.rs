@@ -22,7 +22,7 @@ fn run(cmd: &[&str]) -> (i32, String) {
 }
 
 pub fn init(force: bool) -> Result<()> {
-    use crate::config::{config_dir, config_file, save_config, Config};
+    use crate::config::{Config, config_dir, config_file, save_config};
     let secret = generate_secret();
     let dir = config_dir();
     std::fs::create_dir_all(&dir)?;
@@ -64,16 +64,17 @@ pub fn repo_add(name_or_path: &str) -> Result<()> {
     let config = load_config()?;
     let url = config.webhook.funnel_url.clone();
     let secret = config.webhook.secret.clone();
-    if !url.is_empty() && !secret.is_empty() {
-        if let Some(hook_id) = create_webhook(&entry.github, &url, &secret)? {
-            // update config with hook_id
-            let mut cfg = load_config()?;
-            if let Some(r) = cfg.repos.iter_mut().find(|r| r.name == entry.name) {
-                r.hook_id = Some(hook_id);
-            }
-            save_config(&cfg)?;
-            println!("Webhook created (id={})", hook_id);
+    if !url.is_empty()
+        && !secret.is_empty()
+        && let Some(hook_id) = create_webhook(&entry.github, &url, &secret)?
+    {
+        // update config with hook_id
+        let mut cfg = load_config()?;
+        if let Some(r) = cfg.repos.iter_mut().find(|r| r.name == entry.name) {
+            r.hook_id = Some(hook_id);
         }
+        save_config(&cfg)?;
+        println!("Webhook created (id={})", hook_id);
     }
     println!("Repo added: {} -> {}", entry.name, entry.path);
     let n = sync_labels(&entry.github);
@@ -268,8 +269,8 @@ pub fn listen(port: Option<u16>) -> Result<()> {
 
 pub fn mentions(once: bool, interval: Option<u64>) -> Result<()> {
     use crate::mentions::{
-        parse_cancel_invocation, parse_invocation, AgentDispatcher, Engine, EventSource,
-        EventStore, GhAuthorizer, GhEventSource, SqliteEventStore,
+        AgentDispatcher, Engine, EventSource, EventStore, GhAuthorizer, GhEventSource,
+        SqliteEventStore, parse_cancel_invocation, parse_invocation,
     };
 
     let config = load_config()?;
@@ -381,13 +382,13 @@ pub fn secret_rotate() -> Result<()> {
     let url = config.webhook.funnel_url.clone();
     for repo in &config.repos {
         let github = repo.github.clone();
-        if let Some(hook_id) = repo.hook_id {
-            if !github.is_empty() && !url.is_empty() {
-                let ok =
-                    crate::webhook_manager::update_webhook(&github, hook_id, &url, &new_secret)
-                        .unwrap_or(false);
-                println!("  {}: {}", github, if ok { "updated" } else { "FAILED" });
-            }
+        if let Some(hook_id) = repo.hook_id
+            && !github.is_empty()
+            && !url.is_empty()
+        {
+            let ok = crate::webhook_manager::update_webhook(&github, hook_id, &url, &new_secret)
+                .unwrap_or(false);
+            println!("  {}: {}", github, if ok { "updated" } else { "FAILED" });
         }
     }
     // update service file
@@ -578,10 +579,10 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
             println!("Launched thread: {}", tid);
         }
         Err(e) => {
-            if let Some(id) = exec_id {
-                if !crate::execution::is_cancel_requested(id) {
-                    let _ = crate::execution::fail_execution(id, &e);
-                }
+            if let Some(id) = exec_id
+                && !crate::execution::is_cancel_requested(id)
+            {
+                let _ = crate::execution::fail_execution(id, &e);
             }
             println!("Failed to launch agent: {e}");
         }
@@ -637,15 +638,15 @@ fn resolve_cancel_target(
     if let Some(id) = execution_id.map(str::trim).filter(|s| !s.is_empty()) {
         let rec = crate::execution::get_execution(id)?
             .ok_or_else(|| anyhow::anyhow!("execution not found: {id}"))?;
-        if let Some(repo) = repo {
-            if !rec.repo.eq_ignore_ascii_case(repo) {
-                anyhow::bail!("execution {id} does not belong to repo {repo}");
-            }
+        if let Some(repo) = repo
+            && !rec.repo.eq_ignore_ascii_case(repo)
+        {
+            anyhow::bail!("execution {id} does not belong to repo {repo}");
         }
-        if let Some(issue) = issue {
-            if rec.issue_number != issue as i64 {
-                anyhow::bail!("execution {id} does not match issue #{issue}");
-            }
+        if let Some(issue) = issue
+            && rec.issue_number != issue as i64
+        {
+            anyhow::bail!("execution {id} does not match issue #{issue}");
         }
         if let Some(pr) = pr {
             let pr_match = rec
@@ -867,22 +868,22 @@ pub fn runner(once: bool) -> Result<()> {
                             .post(format!("{}/jobs/{}/heartbeat", gw_hb, encode_path_segment(&job_hb)))
                             .json(&serde_json::json!({"runner_id": runner_hb, "token": token_hb, "status": "running"}))
                             .send();
-                        if let Ok(r) = resp {
-                            if let Ok(body) = r.json::<serde_json::Value>() {
-                                let job_status = body
-                                    .get("job_status")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                if job_status == "cancelled" || job_status == "cancelling" {
-                                    if let Some(ref id) = exec_hb {
-                                        let _ = crate::execution::request_cancel(
-                                            id,
-                                            "gateway",
-                                            false,
-                                            Some("gateway job cancelled"),
-                                        );
-                                    }
-                                }
+                        if let Ok(r) = resp
+                            && let Ok(body) = r.json::<serde_json::Value>()
+                        {
+                            let job_status = body
+                                .get("job_status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if (job_status == "cancelled" || job_status == "cancelling")
+                                && let Some(ref id) = exec_hb
+                            {
+                                let _ = crate::execution::request_cancel(
+                                    id,
+                                    "gateway",
+                                    false,
+                                    Some("gateway job cancelled"),
+                                );
                             }
                         }
                         for _ in 0..15 {
@@ -1047,11 +1048,15 @@ mod tests {
             enabled: true,
         };
         let results = repo_check_results(&repo, true);
-        assert!(results
-            .iter()
-            .any(|(l, m)| *l == "FAIL" && m.contains("path missing")));
-        assert!(results
-            .iter()
-            .any(|(l, m)| *l == "FAIL" && m.contains("hook_id missing")));
+        assert!(
+            results
+                .iter()
+                .any(|(l, m)| *l == "FAIL" && m.contains("path missing"))
+        );
+        assert!(
+            results
+                .iter()
+                .any(|(l, m)| *l == "FAIL" && m.contains("hook_id missing"))
+        );
     }
 }

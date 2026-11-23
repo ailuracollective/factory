@@ -46,7 +46,7 @@ pub async fn handle_webhook(req: &Request, env: &worker::Env) -> ohkami::Respons
             return json_response(
                 &serde_json::json!({"status": "ignored", "reason": "no issue"}),
                 202,
-            )
+            );
         }
     };
     let number = match issue.get("number").and_then(|v| v.as_i64()) {
@@ -55,7 +55,7 @@ pub async fn handle_webhook(req: &Request, env: &worker::Env) -> ohkami::Respons
             return json_response(
                 &serde_json::json!({"status": "ignored", "reason": "bad number"}),
                 202,
-            )
+            );
         }
     };
 

@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ailura-notifications"
+name = "notifications"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -951,10 +951,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "factory"
+name = "cli"
 version = "0.1.0"
 dependencies = [
- "ailura-notifications",
+ "notifications",
  "anyhow",
  "axum",
  "clap",

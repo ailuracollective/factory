@@ -2,7 +2,7 @@
 
 ## Monorepo
 
-- Cargo workspace at root (`Cargo.toml`) with Rust crates under `apps/*` and `packages/*`.
+- Cargo workspace at root (`Cargo.toml`) with Rust crates under `apps/*` and `internal/*`.
 - Each app builds/tests independently via cargo.
 
 ## Components
@@ -10,9 +10,9 @@
 ### Factory CLI (`apps/cli`)
 Local daemon + manual commands. Three modes:
 - Local mode (existing): webhooks direct to machine, T3 agent launch.
-- Mentions: `factory listen` handles mention webhooks in real time
+- Mentions: `cli listen` handles mention webhooks in real time
   (`issue_comment`, `issues`, `pull_request`, `pull_request_review_comment`);
-  `factory mentions` provides polling fallback. Parsing, authorization, dedup and
+  `cli mentions` provides polling fallback. Parsing, authorization, dedup and
   dispatch live in `apps/cli/src/mentions.rs` behind `EventSource`/`Engine`, so a
   Gateway-backed source can replace polling without changing core logic.
 - Connected mode (future): outbound connection to Gateway, claim jobs, report status.

@@ -1,9 +1,9 @@
 [package]
-name = "factory-gateway"
+name = "gateway"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "Ailura Factory Gateway (Cloudflare Worker)"
-license = "MIT"
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]

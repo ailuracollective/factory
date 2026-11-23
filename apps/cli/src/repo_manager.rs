@@ -1,4 +1,4 @@
-use crate::config::{get_repo, load_config, save_config, RepoEntry};
+use crate::config::{RepoEntry, get_repo, load_config, save_config};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -179,19 +179,19 @@ pub fn remove_repo(name: &str) -> bool {
         Some(r) => r.clone(),
         None => return false,
     };
-    if let Some(hook_id) = repo.hook_id {
-        if !repo.github.is_empty() {
-            run(
-                &[
-                    "gh",
-                    "api",
-                    &format!("repos/{}/hooks/{}", repo.github, hook_id),
-                    "-X",
-                    "DELETE",
-                ],
-                None,
-            );
-        }
+    if let Some(hook_id) = repo.hook_id
+        && !repo.github.is_empty()
+    {
+        run(
+            &[
+                "gh",
+                "api",
+                &format!("repos/{}/hooks/{}", repo.github, hook_id),
+                "-X",
+                "DELETE",
+            ],
+            None,
+        );
     }
     config.repos.retain(|r| r.name != name && r.github != name);
     save_config(&config).ok();

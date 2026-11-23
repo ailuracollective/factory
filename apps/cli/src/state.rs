@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sea_orm::{
-    sea_query::OnConflict, ActiveModelTrait, ColumnTrait, ConnectionTrait, Database,
-    DatabaseConnection, DbBackend, EntityTrait, PaginatorTrait, QueryFilter, Schema, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend,
+    EntityTrait, PaginatorTrait, QueryFilter, Schema, Set, sea_query::OnConflict,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -175,15 +175,15 @@ pub fn now() -> u64 {
 }
 
 pub fn state_file() -> PathBuf {
-    if let Ok(p) = std::env::var("ISSUE_FACTORY_DB_FILE") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("ISSUE_FACTORY_DB_FILE")
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
     }
-    if let Ok(p) = std::env::var("ISSUE_FACTORY_STATE_FILE") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("ISSUE_FACTORY_STATE_FILE")
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
     }
     dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
@@ -371,10 +371,10 @@ async fn save_state_db(path: PathBuf, issues: HashMap<String, IssueState>) -> Re
 pub fn load_state() -> HashMap<String, IssueState> {
     let path = state_file();
 
-    if path.exists() {
-        if let Ok(issues) = run_async(load_state_db(path.clone())) {
-            return issues;
-        }
+    if path.exists()
+        && let Ok(issues) = run_async(load_state_db(path.clone()))
+    {
+        return issues;
     }
 
     let issues = HashMap::new();
@@ -529,7 +529,8 @@ pub mod tests {
             },
         );
         let tmp = std::env::temp_dir().join("factory_state_test.db");
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
         let _ = fs::remove_file(&tmp);
         save_state(&m).unwrap();
         let loaded = load_state();
@@ -539,14 +540,16 @@ pub mod tests {
             Some("t-1")
         );
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 
     #[test]
     fn reconcile_running_to_failed() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let tmp = std::env::temp_dir().join("factory_state_running.db");
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
         let _ = fs::remove_file(&tmp);
         let mut m = HashMap::new();
         m.insert(
@@ -561,6 +564,7 @@ pub mod tests {
         let loaded = load_state();
         assert_eq!(loaded.get("r#1").unwrap().status, IssueStatus::Failed);
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 }

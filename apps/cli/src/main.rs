@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand};
-use factory::cli;
+use cli::cli;
 use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(
-    name = "factory",
+    name = "cli",
     version,
     about = "AI Factory CLI",
     disable_help_subcommand = true

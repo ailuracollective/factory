@@ -1,4 +1,4 @@
-use ohkami::{claw::Path, Request, Response};
+use ohkami::{Request, Response, claw::Path};
 use serde::Deserialize;
 
 use super::json_response;
@@ -28,7 +28,7 @@ pub async fn handle_register(req: &Request, env: &worker::Env) -> Response {
             return json_response(
                 &serde_json::json!({"error": "token generation failed"}),
                 500,
-            )
+            );
         }
     };
     let conn = match infra::db::connect(env).await {

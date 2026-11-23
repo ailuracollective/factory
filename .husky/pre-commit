@@ -1,3 +1,3 @@
 #!/bin/sh
 cargo fmt --all -- --check
-cargo clippy -p factory -- -D warnings
+cargo clippy -p cli -- -D warnings

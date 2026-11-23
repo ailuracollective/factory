@@ -1,4 +1,4 @@
-use ohkami::{claw::Path, Request, Response};
+use ohkami::{Request, Response, claw::Path};
 
 use super::json_response;
 use crate::infra;
@@ -107,7 +107,7 @@ pub async fn handle_rotate_runner(
             return json_response(
                 &serde_json::json!({"error": "token generation failed"}),
                 500,
-            )
+            );
         }
     };
     let conn = match infra::db::connect(env).await {

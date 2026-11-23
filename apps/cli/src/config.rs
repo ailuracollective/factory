@@ -166,10 +166,10 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_file() -> PathBuf {
-    if let Ok(p) = std::env::var("ISSUE_FACTORY_CONFIG_FILE") {
-        if !p.trim().is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("ISSUE_FACTORY_CONFIG_FILE")
+        && !p.trim().is_empty()
+    {
+        return PathBuf::from(p);
     }
     config_dir().join("config.json")
 }

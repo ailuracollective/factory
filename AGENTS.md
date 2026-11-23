@@ -6,10 +6,10 @@ Guidance for coding agents working in this repository.
 
 Ailura Factory is a monorepo for AI-assisted development automation.
 
-- `apps/cli` — Rust CLI (`factory`), runs agents locally (T3 Code today).
+- `apps/cli` — Rust CLI (`cli`), runs agents locally (T3 Code today).
 - `apps/gateway` — Rust Cloudflare Worker (GitHub App gateway, D1 persistence).
 - `apps/bot` — Rust bot for chat notifications.
-- `packages/notifications` — Shared notification contract.
+- `internal/notifications` — Shared notification contract.
 - `docs/` — architecture, audit, migration plan, roadmap.
 - `Cargo.toml` (root) — Cargo workspace for Rust crates.
 
@@ -17,15 +17,15 @@ Ailura Factory is a monorepo for AI-assisted development automation.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p factory -- -D warnings
-cargo build -p factory
-cargo test -p factory
+cargo clippy -p cli -- -D warnings
+cargo build -p cli
+cargo test -p cli
 ```
 
 Gateway (wasm32):
 ```bash
-cargo clippy -p factory-gateway --target wasm32-unknown-unknown -- -D warnings
-cargo build -p factory-gateway --target wasm32-unknown-unknown --release
+cargo clippy -p gateway --target wasm32-unknown-unknown -- -D warnings
+cargo build -p gateway --target wasm32-unknown-unknown --release
 ```
 
 ## Conventions

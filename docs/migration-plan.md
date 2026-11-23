@@ -17,7 +17,7 @@
 - Admin API: list jobs, cancel.
 
 ## Phase 2 — CLI connected mode
-- `factory connect` to register runner.
+- `cli connect` to register runner.
 - Poll/claim jobs via outbound HTTPS.
 - Report status/result.
 - Reconcile on restart.

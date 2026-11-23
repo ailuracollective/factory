@@ -5,7 +5,7 @@
 //! the existing agent launcher. A future Gateway-backed `EventSource` can reuse
 //! the same parser and engine.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
@@ -430,7 +430,7 @@ impl<'a> Engine<'a> {
             match crate::execution::get_execution(exec_id) {
                 Ok(Some(rec)) if rec.repo.eq_ignore_ascii_case(&event.repo) => rec,
                 Ok(Some(_)) => {
-                    return self.reject(key, "execution does not belong to repo".to_string())
+                    return self.reject(key, "execution does not belong to repo".to_string());
                 }
                 Ok(None) => return self.reject(key, format!("execution not found: {exec_id}")),
                 Err(e) => return self.reject(key, format!("execution lookup failed: {e}")),
@@ -539,14 +539,12 @@ impl<'a> Engine<'a> {
         if cfg.allowed_authors.iter().any(|u| login_eq(u, author)) {
             return true;
         }
-        if let Some(rec) = target {
-            if let Some(req) = rec.requester.as_deref() {
-                if req.eq_ignore_ascii_case(&format!("github:{author}"))
-                    || req.eq_ignore_ascii_case(author)
-                {
-                    return true;
-                }
-            }
+        if let Some(rec) = target
+            && let Some(req) = rec.requester.as_deref()
+            && (req.eq_ignore_ascii_case(&format!("github:{author}"))
+                || req.eq_ignore_ascii_case(author))
+        {
+            return true;
         }
         false
     }
@@ -1559,7 +1557,8 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join("factory_mentions_store.db");
         let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
 
         let store = SqliteEventStore;
         assert!(store.cursor("org/factory").is_none());
@@ -1587,7 +1586,8 @@ mod tests {
         );
 
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 
     #[test]
@@ -1643,7 +1643,8 @@ mod tests {
             uuid::Uuid::now_v7().simple()
         ));
         let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
         let rec = crate::execution::create_execution(
             "org/factory#5",
             "org/factory",
@@ -1668,7 +1669,8 @@ mod tests {
         let out = engine.handle(&ev, 100);
         assert!(matches!(out, Outcome::Rejected(_)));
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 
     #[test]
@@ -1681,7 +1683,8 @@ mod tests {
             uuid::Uuid::now_v7().simple()
         ));
         let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
         let a = crate::execution::create_execution(
             "org/factory#5",
             "org/factory",
@@ -1728,6 +1731,7 @@ mod tests {
             other => panic!("expected rejected, got {other:?}"),
         }
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 }

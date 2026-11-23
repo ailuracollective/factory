@@ -4,9 +4,9 @@ members = [
     "apps/cli",
     "apps/gateway",
     "apps/bot",
-    "packages/notifications",
+    "internal/notifications",
 ]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT"

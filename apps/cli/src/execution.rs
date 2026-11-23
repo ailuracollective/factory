@@ -1,7 +1,7 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use sea_orm::{
-    sea_query::OnConflict, ActiveModelTrait, ColumnTrait, ConnectionTrait, Database,
-    DatabaseConnection, DbBackend, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Schema, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend,
+    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Schema, Set, sea_query::OnConflict,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -354,10 +354,10 @@ pub fn transition_execution(
             .await?
             .ok_or_else(|| anyhow!("execution not found: {id}"))?;
         let current = ExecutionStatus::parse_status(&row.status);
-        if let Some(exp) = expected {
-            if current != exp {
-                return Ok(ExecutionRecord::from_model(row));
-            }
+        if let Some(exp) = expected
+            && current != exp
+        {
+            return Ok(ExecutionRecord::from_model(row));
         }
         if current.is_terminal() {
             return Ok(ExecutionRecord::from_model(row));
@@ -697,10 +697,12 @@ mod tests {
         let tmp =
             std::env::temp_dir().join(format!("factory_exec_test_{}.db", uuid::Uuid::now_v7()));
         let _ = fs::remove_file(&tmp);
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
         f();
         std::fs::remove_file(&tmp).ok();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 
     #[test]
@@ -714,10 +716,12 @@ mod tests {
         ));
         fs::write(&parent, "file").unwrap();
         let db_path = parent.join("factory.db");
-        std::env::set_var("ISSUE_FACTORY_DB_FILE", db_path.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", db_path.to_str().unwrap()) };
         assert!(create_execution("org/repo#1", "org/repo", 1, 1, None, None, None).is_err());
         fs::remove_file(parent).unwrap();
-        std::env::remove_var("ISSUE_FACTORY_DB_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
     }
 
     #[test]

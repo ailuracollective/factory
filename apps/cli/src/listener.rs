@@ -1,10 +1,10 @@
 use anyhow::Result;
 use axum::{
+    Router,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::Json,
     routing::{get, post},
-    Router,
 };
 use hmac::{Hmac, Mac};
 use serde_json::Value;
@@ -16,17 +16,16 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
 use crate::config::Config;
-use crate::state::{load_state, save_state, IssueState, IssueStatus};
+use crate::state::{IssueState, IssueStatus, load_state, save_state};
 
 type HmacSha256 = Hmac<Sha256>;
 
 fn max_attempts(config: &Config) -> u32 {
-    if let Ok(s) = std::env::var("ISSUE_FACTORY_MAX_ATTEMPTS") {
-        if let Ok(n) = s.parse::<u32>() {
-            if n > 0 {
-                return n;
-            }
-        }
+    if let Ok(s) = std::env::var("ISSUE_FACTORY_MAX_ATTEMPTS")
+        && let Ok(n) = s.parse::<u32>()
+        && n > 0
+    {
+        return n;
     }
     if config.defaults.max_attempts > 0 {
         config.defaults.max_attempts
@@ -131,7 +130,7 @@ async fn webhook(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": "invalid json"})),
-            )
+            );
         }
     };
     if !payload.is_object() {
@@ -195,34 +194,32 @@ async fn handle_payload(state: AppState, event: String, payload: Value) -> Strin
     if mention_eligible
         && state.config.mentions.enabled
         && !state.config.mentions.usernames.is_empty()
+        && let Some(mention_event) = crate::mentions::event_from_webhook(&event, &payload)
     {
-        if let Some(mention_event) = crate::mentions::event_from_webhook(&event, &payload) {
-            let config = state.config.clone();
-            let outcome = tokio::task::spawn_blocking(move || {
-                let store = crate::mentions::SqliteEventStore;
-                let dispatcher = crate::mentions::AgentDispatcher {
-                    config: config.clone(),
-                };
-                let authorizer = crate::mentions::GhAuthorizer;
-                let engine =
-                    crate::mentions::Engine::new(&config, &store, &dispatcher, &authorizer);
-                engine.handle(&mention_event, crate::state::now())
-            })
-            .await
-            .unwrap_or(crate::mentions::Outcome::Failed(
-                "mention task panicked".to_string(),
-            ));
-            match outcome {
-                crate::mentions::Outcome::Ignored(_) => {}
-                crate::mentions::Outcome::Rejected(reason) => {
-                    tracing::info!(reason = %reason, "mention rejected; continuing webhook handling");
-                }
-                crate::mentions::Outcome::Launched(thread) => {
-                    return format!("mention launched: {thread}");
-                }
-                crate::mentions::Outcome::Failed(reason) => {
-                    return format!("mention failed: {reason}");
-                }
+        let config = state.config.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let store = crate::mentions::SqliteEventStore;
+            let dispatcher = crate::mentions::AgentDispatcher {
+                config: config.clone(),
+            };
+            let authorizer = crate::mentions::GhAuthorizer;
+            let engine = crate::mentions::Engine::new(&config, &store, &dispatcher, &authorizer);
+            engine.handle(&mention_event, crate::state::now())
+        })
+        .await
+        .unwrap_or(crate::mentions::Outcome::Failed(
+            "mention task panicked".to_string(),
+        ));
+        match outcome {
+            crate::mentions::Outcome::Ignored(_) => {}
+            crate::mentions::Outcome::Rejected(reason) => {
+                tracing::info!(reason = %reason, "mention rejected; continuing webhook handling");
+            }
+            crate::mentions::Outcome::Launched(thread) => {
+                return format!("mention launched: {thread}");
+            }
+            crate::mentions::Outcome::Failed(reason) => {
+                return format!("mention failed: {reason}");
             }
         }
     }
@@ -565,7 +562,7 @@ fn issue_matches_label(label: &str, issue: &Value, action: &str, payload: &Value
 mod lifecycle_tests {
     use super::*;
     use crate::config::{Config, RepoEntry};
-    use crate::state::{load_state, IssueStatus};
+    use crate::state::{IssueStatus, load_state};
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -603,10 +600,12 @@ mod lifecycle_tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let state_file = std::env::temp_dir().join("factory_lc_failed_state.json");
         let _ = std::fs::remove_file(&state_file);
-        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
 
         let t3_fail = write_script("t3_fail.sh", "#!/bin/sh\nexit 1\n");
-        std::env::set_var("ISSUE_FACTORY_T3", t3_fail.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", t3_fail.to_str().unwrap()) };
 
         let state = AppState {
             config: Arc::new(make_config(&tmp)),
@@ -626,7 +625,8 @@ mod lifecycle_tests {
             "t3_ok.sh",
             "#!/bin/sh\necho '{\"threadId\":\"thread-123\"}'\n",
         );
-        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap()) };
 
         let r2 = handle_payload(state.clone(), "issues".to_string(), payload).await;
         assert!(r2.starts_with("launched"), "{}", r2);
@@ -636,8 +636,10 @@ mod lifecycle_tests {
         assert_eq!(rec.status, IssueStatus::Completed);
         assert_eq!(rec.thread_id.as_deref(), Some("thread-123"));
 
-        std::env::remove_var("ISSUE_FACTORY_T3");
-        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
     }
 
     #[tokio::test]
@@ -650,13 +652,15 @@ mod lifecycle_tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let state_file = std::env::temp_dir().join("factory_lc_dup_state.json");
         let _ = std::fs::remove_file(&state_file);
-        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
 
         let t3_ok = write_script(
             "t3_ok2.sh",
             "#!/bin/sh\necho '{\"threadId\":\"thread-dup\"}'\n",
         );
-        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap()) };
 
         let state = AppState {
             config: Arc::new(make_config(&tmp)),
@@ -673,8 +677,10 @@ mod lifecycle_tests {
         let r2 = handle_payload(state.clone(), "issues".to_string(), payload).await;
         assert!(r2.contains("already"), "{}", r2);
 
-        std::env::remove_var("ISSUE_FACTORY_T3");
-        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -687,13 +693,15 @@ mod lifecycle_tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let state_file = std::env::temp_dir().join("factory_lc_conc_state.json");
         let _ = std::fs::remove_file(&state_file);
-        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
 
         let t3_slow = write_script(
             "t3_slow.sh",
             "#!/bin/sh\nsleep 1\necho '{\"threadId\":\"thread-conc\"}'\n",
         );
-        std::env::set_var("ISSUE_FACTORY_T3", t3_slow.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", t3_slow.to_str().unwrap()) };
 
         let state = AppState {
             config: Arc::new(make_config(&tmp)),
@@ -722,8 +730,10 @@ mod lifecycle_tests {
             vals
         );
 
-        std::env::remove_var("ISSUE_FACTORY_T3");
-        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
     }
 
     #[tokio::test]
@@ -733,7 +743,8 @@ mod lifecycle_tests {
             .unwrap_or_else(|e| e.into_inner());
         let state_file = std::env::temp_dir().join("factory_lc_restart_state.json");
         let _ = std::fs::remove_file(&state_file);
-        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
 
         // persist a running record
         let mut m = std::collections::HashMap::new();
@@ -753,7 +764,8 @@ mod lifecycle_tests {
             IssueStatus::Failed
         );
 
-        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
     }
 
     #[tokio::test]
@@ -766,13 +778,15 @@ mod lifecycle_tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let state_file = std::env::temp_dir().join("factory_lc_mention_wh_state.json");
         let _ = std::fs::remove_file(&state_file);
-        std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
 
         let t3_ok = write_script(
             "t3_mention_wh.sh",
             "#!/bin/sh\necho '{\"threadId\":\"thread-mention-wh\"}'\n",
         );
-        std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap());
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", t3_ok.to_str().unwrap()) };
 
         let mut config = make_config(&tmp);
         config.mentions.enabled = true;
@@ -800,7 +814,9 @@ mod lifecycle_tests {
         let r = handle_payload(state.clone(), "issue_comment".to_string(), payload).await;
         assert!(r.starts_with("mention launched"), "{}", r);
 
-        std::env::remove_var("ISSUE_FACTORY_T3");
-        std::env::remove_var("ISSUE_FACTORY_STATE_FILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
     }
 }

@@ -4,8 +4,8 @@ use sea_orm::{
     Database, DatabaseConnection, DbBackend, DbErr, ProxyDatabaseTrait, ProxyExecResult, ProxyRow,
     RuntimeErr, Statement, Value, Values,
 };
-use worker::wasm_bindgen::JsValue;
 use worker::D1Database;
+use worker::wasm_bindgen::JsValue;
 
 struct D1Bridge(Arc<D1Database>);
 
