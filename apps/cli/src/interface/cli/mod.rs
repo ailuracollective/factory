@@ -1,4 +1,4 @@
-use crate::config::{get_repo, load_config, save_config};
+use crate::config::{FactoryRepoConfig, get_repo, load_config, load_factory_config, save_config};
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -394,11 +394,67 @@ pub fn models(provider: Option<&str>) -> Result<()> {
 }
 
 pub fn config_get() -> Result<()> {
-    let cfg = load_config()?;
+    let mut cfg = load_config()?;
+    // Apply repo-level factory.json if present in cwd or an ancestor.
+    if let Some(repo_cfg) = find_factory_config() {
+        if let Some(d) = repo_cfg.defaults {
+            if !d.provider.is_empty() {
+                cfg.defaults.provider = d.provider;
+            }
+            if !d.model.is_empty() {
+                cfg.defaults.model = d.model;
+            }
+            if !d.base_branch.is_empty() {
+                cfg.defaults.base_branch = d.base_branch;
+            }
+            if !d.label.is_empty() {
+                cfg.defaults.label = d.label;
+            }
+            if d.max_attempts > 0 {
+                cfg.defaults.max_attempts = d.max_attempts;
+            }
+        }
+        if let Some(m) = repo_cfg.mentions {
+            if m.enabled {
+                cfg.mentions.enabled = true;
+            }
+            if !m.usernames.is_empty() {
+                cfg.mentions.usernames = m.usernames;
+            }
+            if !m.command.is_empty() {
+                cfg.mentions.command = m.command;
+            }
+            if !m.allowed_authors.is_empty() {
+                cfg.mentions.allowed_authors = m.allowed_authors;
+            }
+            if m.daily_quota > 0 {
+                cfg.mentions.daily_quota = m.daily_quota;
+            }
+            cfg.mentions.report = m.report;
+            for u in m.usernames_extra {
+                if !cfg.mentions.usernames.contains(&u) {
+                    cfg.mentions.usernames.push(u);
+                }
+            }
+        }
+    }
     println!("provider: {}", cfg.defaults.provider);
     println!("model:    {}", cfg.defaults.model);
     println!("mentions.usernames: {}", cfg.mentions.usernames.join(", "));
     Ok(())
+}
+
+fn find_factory_config() -> Option<FactoryRepoConfig> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if let Some(cfg) = load_factory_config(&dir) {
+            return Some(cfg);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
 }
 
 pub fn config_set(key: &str, value: &str) -> Result<()> {
