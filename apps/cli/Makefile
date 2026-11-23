@@ -8,7 +8,8 @@ build:
 install: build
 	mkdir -p ~/.local/bin
 	-~/.local/bin/factory stop 2>/dev/null || true
-	cp $(ROOT)/target/release/factory ~/.local/bin/factory
+	install -m 755 $(ROOT)/target/release/factory ~/.local/bin/factory.new
+	mv -f ~/.local/bin/factory.new ~/.local/bin/factory
 	cp $(ROOT)/target/release/afc ~/.local/bin/afc 2>/dev/null || true
 	cp $(ROOT)/target/release/factory ~/.cargo/bin/factory 2>/dev/null || true
 	cp $(ROOT)/target/release/afc ~/.cargo/bin/afc 2>/dev/null || true
