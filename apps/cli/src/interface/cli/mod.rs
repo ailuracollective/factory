@@ -588,9 +588,6 @@ pub fn drain(timeout: u64, json: bool) -> Result<()> {
     }
     Ok(())
 }
-    }
-    Ok(())
-}
 
 pub fn listen(port: Option<u16>) -> Result<()> {
     let mut config = load_config()?;
