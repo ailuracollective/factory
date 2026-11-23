@@ -174,7 +174,8 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
         .arg(&prompt)
         .arg("--title")
         .arg(&thread_title)
-        .arg("--harness")
+        // T3 names the harness flag `--provider`.
+        .arg("--provider")
         .arg(&harness)
         .arg("--model")
         .arg(&model)
@@ -272,6 +273,57 @@ mod tests {
         read_bounded_tail(&mut input.as_slice(), &mut captured);
         assert_eq!(captured.len(), MAX_CAPTURED_OUTPUT);
         assert!(captured.iter().all(|b| *b == b'a'));
+    }
+
+    #[test]
+    fn launch_passes_harness_as_t3_provider_flag() {
+        let _lock = crate::state::tests::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "factory_agent_args_{}",
+            uuid::Uuid::now_v7().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("t3");
+        let args_file = dir.join("args");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho '{{\"threadId\":\"t1\"}}'\n",
+                args_file.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap()) };
+
+        let config = crate::config::Config::default();
+        let issue = serde_json::json!({"number": 7, "title": "t", "url": "u"});
+        let res = launch_agent_with_execution(AgentLaunchRequest {
+            issue: &issue,
+            project: &dir,
+            config: &config,
+            prompt: Some("p"),
+            existing_thread: None,
+            attempt: 1,
+            execution_id: None,
+        });
+        assert_eq!(res.unwrap(), "t1");
+
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        let args: Vec<&str> = args.lines().collect();
+        let flag = args.iter().position(|a| *a == "--provider").unwrap();
+        assert_eq!(args[flag + 1], "opencode");
+        assert!(!args.contains(&"--harness"));
+
+        unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
