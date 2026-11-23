@@ -233,7 +233,14 @@ fn main() -> ExitCode {
             pr,
             force,
             json,
-        } => cli::cancel(execution_id.as_deref(), repo.as_deref(), issue, pr, force, json),
+        } => cli::cancel(
+            execution_id.as_deref(),
+            repo.as_deref(),
+            issue,
+            pr,
+            force,
+            json,
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
