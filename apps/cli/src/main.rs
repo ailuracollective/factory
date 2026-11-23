@@ -59,37 +59,6 @@ enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
-    /// Start the daemon (deprecated: use `daemon start`)
-    #[command(hide = true)]
-    Start,
-    /// Stop the daemon (deprecated: use `daemon stop`)
-    #[command(hide = true)]
-    Stop,
-    /// Restart the daemon (deprecated: use `daemon restart`)
-    #[command(hide = true)]
-    Restart,
-    /// Show status (deprecated: use `daemon status`)
-    #[command(hide = true)]
-    Status {
-        #[arg(long)]
-        json: bool,
-        #[arg(long)]
-        verbose: bool,
-    },
-    /// Show daemon logs (deprecated: use `daemon logs`)
-    #[command(hide = true)]
-    Logs {
-        #[arg(short, long)]
-        follow: bool,
-        #[arg(short = 'n', long, default_value = "50")]
-        lines: u32,
-    },
-    /// Run the webhook listener (deprecated: use `gateway listen`)
-    #[command(hide = true)]
-    Listen {
-        #[arg(long)]
-        port: Option<u16>,
-    },
     /// Register this runner (deprecated: use `gateway connect`)
     #[command(hide = true)]
     Connect {
@@ -286,16 +255,10 @@ fn main() -> ExitCode {
             DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
             DaemonAction::Run { mode, port } => cli::daemon_run(&mode, port),
         },
-        Commands::Start => cli::start(),
-        Commands::Stop => cli::stop(),
-        Commands::Restart => cli::restart(),
-        Commands::Status { json, verbose } => cli::status(json, verbose),
         Commands::Secret { action } => match action {
             SecretAction::Rotate => cli::secret_rotate(),
         },
-        Commands::Logs { follow, lines } => cli::logs(follow, lines),
         Commands::Doctor { json } => cli::doctor(json),
-        Commands::Listen { port } => cli::listen(port),
         Commands::Connect {
             gateway,
             runner,
