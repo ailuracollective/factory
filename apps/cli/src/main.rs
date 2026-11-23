@@ -105,8 +105,8 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum RepoAction {
-    /// Add a repo
-    Add { repo: String },
+    /// Add a repo (defaults to the current directory)
+    Add { repo: Option<String> },
     /// List repos
     List,
     /// Remove a repo
@@ -135,7 +135,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Commands::Init { force } => cli::init(force),
         Commands::Repo { action } => match action {
-            RepoAction::Add { repo } => cli::repo_add(&repo),
+            RepoAction::Add { repo } => cli::repo_add(repo.as_deref().unwrap_or(".")),
             RepoAction::List => cli::repo_list(),
             RepoAction::Remove { name } => cli::repo_remove(&name),
             RepoAction::Sync { name } => cli::repo_sync(&name),
