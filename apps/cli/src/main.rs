@@ -127,7 +127,7 @@ enum ConfigAction {
     /// Get current defaults
     Get,
     /// Set a default value
-    Set { key: String, value: String },
+    Set { key: String, value: String, #[arg(short = 'g', long)] global: bool },
 }
 
 fn main() -> ExitCode {
@@ -177,7 +177,7 @@ fn main() -> ExitCode {
         Commands::Models { provider } => cli::models(provider.as_deref()),
         Commands::Config { action } => match action {
             ConfigAction::Get => cli::config_get(),
-            ConfigAction::Set { key, value } => cli::config_set(&key, &value),
+            ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),
         },
         Commands::Cancel {
             execution_id,

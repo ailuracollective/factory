@@ -1,4 +1,4 @@
-use crate::config::{FactoryRepoConfig, get_repo, load_config, load_factory_config, save_config};
+use crate::config::{Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config, save_config};
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -467,7 +467,7 @@ fn find_factory_config() -> Option<FactoryRepoConfig> {
     None
 }
 
-pub fn config_set(key: &str, value: &str) -> Result<()> {
+pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
     // validate against opencode models
     let (code, out) = run(&["opencode", "models"]);
     let models: Vec<&str> = if code == 0 {
@@ -478,6 +478,36 @@ pub fn config_set(key: &str, value: &str) -> Result<()> {
     } else {
         Vec::new()
     };
+    if !global {
+        let path = std::env::current_dir().unwrap_or_default().join("factory.json");
+        let mut fc: FactoryRepoConfig = if path.exists() {
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default()
+        } else {
+            FactoryRepoConfig::default()
+        };
+        if fc.defaults.is_none() { fc.defaults = Some(Defaults { provider: String::new(), model: String::new(), base_branch: String::new(), label: String::new(), max_attempts: 0 }); }
+        if fc.mentions.is_none() { fc.mentions = Some(MentionsConfig::default()); }
+        let d = fc.defaults.as_mut().unwrap();
+        let m = fc.mentions.as_mut().unwrap();
+        match key {
+            "provider" => d.provider = value.to_string(),
+            "model" => d.model = value.to_string(),
+            "base_branch" => d.base_branch = value.to_string(),
+            "label" => d.label = value.to_string(),
+            "max_attempts" => { if let Ok(n)=value.parse(){ d.max_attempts=n; } else { println!("Invalid number: {}", value); return Ok(());} }
+            "mentions.enabled" => m.enabled = value=="true"||value=="1",
+            "mentions.usernames" => { m.usernames = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
+            "mentions.command" => m.command = value.to_string(),
+            "mentions.allowed_authors" => { m.allowed_authors = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
+            "mentions.daily_quota" => { if let Ok(n)=value.parse(){ m.daily_quota=n; } else { println!("Invalid number: {}", value); return Ok(());} }
+            "mentions.report" => m.report = value=="true"||value=="1",
+            "mentions.usernames_extra" => { m.usernames_extra = value.split(',').map(str::trim).filter(|s|!s.is_empty()).map(String::from).collect(); }
+            _ => { println!("Unknown key."); return Ok(()); }
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
+        println!("Set {} = {} (local)", key, value);
+        return Ok(());
+    }
     let mut cfg = load_config()?;
     match key {
         "provider" => {
