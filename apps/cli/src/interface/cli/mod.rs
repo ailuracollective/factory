@@ -215,7 +215,7 @@ pub(super) fn repo_check_results(
     results
 }
 
-pub fn repo_check(name: Option<&str>) -> Result<()> {
+pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
     let config = load_config()?;
     let repos: Vec<_> = match name {
         Some(n) => match get_repo(&config, n) {
@@ -238,18 +238,57 @@ pub fn repo_check(name: Option<&str>) -> Result<()> {
         !config.webhook.funnel_url.is_empty() && !config.webhook.secret.is_empty();
     let mut failed = 0usize;
 
+    #[derive(serde::Serialize)]
+    struct Check {
+        id: String,
+        status: String,
+        subject: String,
+        message: String,
+    }
+    #[derive(serde::Serialize)]
+    struct RepoResult {
+        name: String,
+        github: String,
+        checks: Vec<Check>,
+        ok: bool,
+    }
+    let mut repo_results: Vec<RepoResult> = Vec::new();
+
     for repo in &repos {
-        println!("{} ({})", repo.name, repo.github);
+        if !json {
+            println!("{} ({})", repo.name, repo.github);
+        }
         let mut repo_ok = true;
+        let mut checks: Vec<Check> = Vec::new();
         for (level, msg) in repo_check_results(repo, webhook_expected) {
-            println!("  [{level}] {msg}");
+            if !json {
+                println!("  [{level}] {msg}");
+            }
             if level == "FAIL" {
                 repo_ok = false;
             }
+            checks.push(Check {
+                id: msg.split(':').next().unwrap_or("check").to_string(),
+                status: level.to_string(),
+                subject: repo.name.clone(),
+                message: msg.clone(),
+            });
         }
         if !repo_ok {
             failed += 1;
         }
+        repo_results.push(RepoResult {
+            name: repo.name.clone(),
+            github: repo.github.clone(),
+            checks,
+            ok: repo_ok,
+        });
+    }
+
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        let env = OutputEnvelope::new(repo_results);
+        println!("{}", to_json(&env).unwrap());
     }
 
     if failed > 0 {
@@ -433,8 +472,8 @@ pub fn logs(follow: bool, lines: u32) -> Result<()> {
     Ok(())
 }
 
-pub fn doctor() -> Result<()> {
-    crate::doctor::run_doctor()
+pub fn doctor(json: bool) -> Result<()> {
+    crate::doctor::run_doctor(json)
 }
 
 mod ops;

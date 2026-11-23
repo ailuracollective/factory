@@ -34,7 +34,10 @@ enum Commands {
         action: SecretAction,
     },
     /// Run diagnostics
-    Doctor,
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     /// List harnesses installed in T3 Code
     Harnesses,
     /// List models of a harness
@@ -131,7 +134,11 @@ enum RepoAction {
     /// Sync labels for a repo
     Sync { name: String },
     /// Check whether repos are correctly configured
-    Check { name: Option<String> },
+    Check {
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -172,7 +179,7 @@ fn main() -> ExitCode {
             RepoAction::List { json } => cli::repo_list(json),
             RepoAction::Remove { name } => cli::repo_remove(&name),
             RepoAction::Sync { name } => cli::repo_sync(&name),
-            RepoAction::Check { name } => cli::repo_check(name.as_deref()),
+            RepoAction::Check { name, json } => cli::repo_check(name.as_deref(), json),
         },
         Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),
@@ -182,7 +189,7 @@ fn main() -> ExitCode {
             SecretAction::Rotate => cli::secret_rotate(),
         },
         Commands::Logs { follow, lines } => cli::logs(follow, lines),
-        Commands::Doctor => cli::doctor(),
+        Commands::Doctor { json } => cli::doctor(json),
         Commands::Listen { port } => cli::listen(port),
         Commands::Connect {
             gateway,
