@@ -30,7 +30,7 @@ Run `factory --help` for the full command list. Common commands:
 - `factory daemon start|stop|restart|status|logs|run` — daemon lifecycle
 - `factory daemon run --mode listener [--port N]` — run webhook listener in the foreground
 - `factory runner` — run as a connected runner (receives job pushes)
-- `factory listen` — run webhook listener (processes GitHub events and runner jobs)
+- `factory daemon run --mode listener` — run webhook listener (processes GitHub events and runner jobs)
 - `factory test <repo> <issue> [--prompt "..."]` — manually launch an agent for an issue
 - `factory run <repo> --prompt "..."` — launch an agent with a custom prompt
 - `factory harnesses [--json]` — list harnesses installed in T3 Code
@@ -70,6 +70,15 @@ is not, values are stored as given.
 `ISSUE_FACTORY_HARNESS` and `ISSUE_FACTORY_MODEL` override the configured
 values for a single process (for example the systemd unit in
 `service.example`).
+
+## Logs
+
+The daemon emits compact warning-and-error logs by default. Set `RUST_LOG=info`
+in the systemd unit temporarily when diagnosing normal webhook activity.
+Systemd's journal rate-limits each service; the example unit allows 200 messages
+per 30 seconds before journald suppresses excess output. Journal retention is
+managed globally by journald, so use `journalctl --user -u factory --since today`
+to inspect Factory logs without vacuuming logs belonging to other services.
 
 ## More
 

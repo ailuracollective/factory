@@ -45,7 +45,7 @@ executed as a shell command.
 
 ## Usage
 
-Webhook mode: `factory listen` processes `issue_comment`, `issues`,
+Webhook mode: `factory daemon run --mode listener` processes `issue_comment`, `issues`,
 `pull_request`, and `pull_request_review_comment` mention events in real time,
 reusing the same parser, authorization, dedup, and dispatch logic. No polling
 delay. A public webhook endpoint (tunnel/GitHub App/gateway) is required.
@@ -103,7 +103,7 @@ new GitHub App or bot account is required.
 
 ## Migration path to Gateway
 
-Mention events are processed from webhooks in real time via `factory listen`.
+Mention events are processed from webhooks in real time via `factory daemon run --mode listener`.
 Parsing, authorization, deduplication, auditing and dispatch live in
 `mentions::Engine`. A Gateway-backed deployment can forward webhook events to the
 runner over a push channel instead of polling.
