@@ -54,6 +54,11 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Manage the daemon
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
     /// Start the daemon (deprecated: use `daemon start`)
     #[command(hide = true)]
     Start,
@@ -184,6 +189,33 @@ enum ConfigAction {
     },
 }
 
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the daemon
+    Start,
+    /// Stop the daemon
+    Stop,
+    /// Restart the daemon
+    Restart,
+    /// Show daemon status
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show daemon logs
+    Logs {
+        #[arg(short, long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: u32,
+    },
+    /// Run the daemon in the foreground
+    Run {
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
+
 fn main() -> ExitCode {
     use tracing_subscriber::EnvFilter;
     let filter =
@@ -201,6 +233,14 @@ fn main() -> ExitCode {
             RepoAction::Remove { name, json } => cli::repo_remove(&name, json),
             RepoAction::Sync { name, json } => cli::repo_sync(&name, json),
             RepoAction::Check { name, json } => cli::repo_check(name.as_deref(), json),
+        },
+        Commands::Daemon { action } => match action {
+            DaemonAction::Start => cli::start(),
+            DaemonAction::Stop => cli::stop(),
+            DaemonAction::Restart => cli::restart(),
+            DaemonAction::Status { json } => cli::status(json),
+            DaemonAction::Logs { follow, lines } => cli::logs(follow, lines),
+            DaemonAction::Run { port } => cli::listen(port),
         },
         Commands::Start => cli::start(),
         Commands::Stop => cli::stop(),

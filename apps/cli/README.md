@@ -27,7 +27,7 @@ Run `factory --help` for the full command list. Common commands:
 - `factory init [--force]` — initialize config
 - `factory doctor` — verify dependencies
 - `factory repo add <repo>` / `factory repo list` / `factory repo remove <name>` — manage repositories
-- `factory start` / `factory stop` / `factory restart` / `factory status` — daemon lifecycle
+- `factory daemon start|stop|restart|status|logs|run` — daemon lifecycle (aliases: `factory start`, `factory stop`, ...)
 - `factory listen [--port N]` — run webhook listener in the foreground
 - `factory runner` — run as a connected runner (receives job pushes)
 - `factory listen` — run webhook listener (processes GitHub events and runner jobs)
