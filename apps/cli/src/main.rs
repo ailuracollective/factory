@@ -88,6 +88,11 @@ enum Commands {
         #[arg(long)]
         prompt: String,
     },
+    /// Manage agents
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
     /// Cancel a running or queued execution
     #[command(hide = true)]
     Cancel {
@@ -108,6 +113,25 @@ enum Commands {
     Execution {
         #[command(subcommand)]
         action: ExecutionAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// Run an agent for an issue or prompt
+    Run {
+        #[arg(long)]
+        repo: String,
+        #[arg(long, group = "source")]
+        issue: Option<u64>,
+        #[arg(long, group = "source")]
+        prompt: Option<String>,
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -298,6 +322,23 @@ fn main() -> ExitCode {
         Commands::Config { action } => match action {
             ConfigAction::Get { json } => cli::config_get(json),
             ConfigAction::Set { key, value, global } => cli::config_set(&key, &value, global),
+        },
+        Commands::Agent { action } => match action {
+            AgentAction::Run {
+                repo,
+                issue,
+                prompt,
+                harness,
+                model,
+                json,
+            } => cli::agent_run(
+                &repo,
+                issue,
+                prompt.as_deref(),
+                harness.as_deref(),
+                model.as_deref(),
+                json,
+            ),
         },
         Commands::Cancel {
             execution_id,
