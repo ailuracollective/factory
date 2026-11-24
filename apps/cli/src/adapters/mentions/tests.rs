@@ -344,7 +344,7 @@ fn prompt_marks_instruction_as_untrusted() {
         "url": "https://github.com/org/factory/issues/5"
     });
     let prompt = build_mention_prompt(&ev, "rm -rf /", &issue, None, Path::new("."));
-    assert!(prompt.contains("Closes #5"));
+    assert!(prompt.contains("Resolve GitHub issue #5"));
     assert!(prompt.contains("untrusted"));
     assert!(prompt.contains("rm -rf /"));
     assert!(prompt.contains("gh pr view 5"));
