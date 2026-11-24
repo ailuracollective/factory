@@ -3,7 +3,8 @@ use crate::config::{
     load_factory_config, save_config, validate_factory_repo_config,
 };
 use crate::repo_manager::{
-    add_repo, list_repos, register_t3, remove_repo, sync_labels, sync_repo_labels,
+    add_repo, list_repos, register_t3, remove_repo, resolve_project_path, sync_labels,
+    sync_repo_labels,
 };
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
@@ -281,20 +282,42 @@ pub fn repo_sync(name: &str, json: bool) -> Result<()> {
     let repo = match get_repo(&config, name) {
         Some(r) => r.clone(),
         None => {
-            if json {
-                use crate::interface::output::{OutputError, to_json};
-                println!(
-                    "{}",
-                    to_json(&OutputError::new(
-                        "REPO_NOT_FOUND",
-                        format!("Repo not found: {}", name)
-                    ))
-                    .unwrap()
-                );
+            // Allow syncing a repository that is not yet registered by resolving
+            // it from projects_base (or a path) the same way `repo add` does.
+            let projects_base = std::path::PathBuf::from(&config.projects_base);
+            let resolved = resolve_project_path(name, &projects_base).and_then(|path| {
+                let path_str = path.to_string_lossy().to_string();
+                let (code, remote) = run(&["git", "-C", &path_str, "remote", "get-url", "origin"]);
+                if code != 0 {
+                    return None;
+                }
+                let slug = crate::repo_manager::github_slug_from_remote(&remote).ok()?;
+                Some(crate::config::RepoEntry {
+                    name: slug.rsplit('/').next().unwrap_or(&slug).to_string(),
+                    path: path_str,
+                    github: slug,
+                    hook_id: None,
+                    enabled: true,
+                })
+            });
+            if let Some(r) = resolved {
+                r
             } else {
-                println!("Repo not found: {}", name);
+                if json {
+                    use crate::interface::output::{OutputError, to_json};
+                    println!(
+                        "{}",
+                        to_json(&OutputError::new(
+                            "REPO_NOT_FOUND",
+                            format!("Repo not found: {}", name)
+                        ))
+                        .unwrap()
+                    );
+                } else {
+                    println!("Repo not found: {}", name);
+                }
+                anyhow::bail!("repo not found: {}", name);
             }
-            anyhow::bail!("repo not found: {}", name);
         }
     };
     let n = match sync_repo_labels(&repo.github) {

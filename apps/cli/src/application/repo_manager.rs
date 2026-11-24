@@ -51,11 +51,16 @@ pub fn resolve_project_path(
 
 pub fn register_t3(project_path: &std::path::Path) -> bool {
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
-    let (code, _) = run(
+    let (code, output) = run(
         &[&t3_bin, "project", "add", project_path.to_str().unwrap()],
         None,
     );
-    code == 0
+    if code == 0 {
+        return true;
+    }
+    // Treat an already-registered project as success so re-running repo add is idempotent.
+    let lower = output.to_ascii_lowercase();
+    lower.contains("already exists") || lower.contains("projectalreadyexists")
 }
 
 pub fn github_slug_from_remote(remote: &str) -> anyhow::Result<String> {
@@ -264,6 +269,33 @@ pub fn sync_repo_labels(repo_slug: &str) -> anyhow::Result<u32> {
     }
     Ok(count)
 }
+
+pub fn remove_repo(name: &str, delete_webhook: bool) -> anyhow::Result<bool> {
+    let mut config = load_config()?;
+    let Some(repo) = get_repo(&config, name).cloned() else {
+        return Ok(false);
+    };
+    if delete_webhook
+        && let Some(hook_id) = repo.hook_id
+        && !repo.github.is_empty()
+        && !crate::webhook_manager::delete_webhook(&repo.github, hook_id)?
+    {
+        anyhow::bail!(
+            "failed to delete webhook {hook_id} for {}; repo registration is unchanged",
+            repo.github
+        );
+    }
+    config
+        .repos
+        .retain(|r| r.name != repo.name && r.github != repo.github);
+    save_config(&config)?;
+    Ok(true)
+}
+
+pub fn list_repos() -> anyhow::Result<Vec<RepoEntry>> {
+    Ok(load_config()?.repos)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{command_message, github_slug_from_remote};
@@ -294,30 +326,4 @@ mod tests {
         );
         assert_eq!(command_message(b"done\n", b"warning"), "done");
     }
-}
-
-pub fn remove_repo(name: &str, delete_webhook: bool) -> anyhow::Result<bool> {
-    let mut config = load_config()?;
-    let Some(repo) = get_repo(&config, name).cloned() else {
-        return Ok(false);
-    };
-    if delete_webhook
-        && let Some(hook_id) = repo.hook_id
-        && !repo.github.is_empty()
-        && !crate::webhook_manager::delete_webhook(&repo.github, hook_id)?
-    {
-        anyhow::bail!(
-            "failed to delete webhook {hook_id} for {}; repo registration is unchanged",
-            repo.github
-        );
-    }
-    config
-        .repos
-        .retain(|r| r.name != repo.name && r.github != repo.github);
-    save_config(&config)?;
-    Ok(true)
-}
-
-pub fn list_repos() -> anyhow::Result<Vec<RepoEntry>> {
-    Ok(load_config()?.repos)
 }
