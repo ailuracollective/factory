@@ -43,9 +43,8 @@ in `.github/ISSUE_TEMPLATE/`. The standard's `config.yml` disables blank issues.
 
 - Titles follow Conventional Commits. The allowed types are the filenames of
   `.github/PULL_REQUEST_TEMPLATE/`, minus the default form.
-- Branches are `<github-username>/<type>/<description>`, all lowercase. The type
-  is the title type, except `breaking-change`, which is a commit marker and not a
-  branch type.
+- Branches are `<type>/<description>`, all lowercase. The type is the title
+  type, except `breaking-change`, which is a commit marker and not a branch type.
 - The body follows the template for the title's type. Common headings are:
   `## Linked issue`, `## Summary`, `## Changes`, `## Verification`,
   `## Risk / compatibility` (optional), `## Migration` (optional).
