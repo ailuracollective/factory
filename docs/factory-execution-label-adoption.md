@@ -35,9 +35,9 @@ Constraints for adopters:
 
 ## Definitions
 
-- **Factory execution catalog (canonical):** the eight state identifiers defined in `factory-execution-label-standard.md` at the pinned revision: `queued`, `processing`, `waiting`, `blocked`, `needs-input`, `failed`, `cancelled`, `completed`. The identifiers are canonical and independent of the configured prefix; they are never renamed per state.
+- **Factory label catalog (canonical):** the standalone `ai` trigger plus eight execution-state identifiers defined in `factory-execution-label-standard.md` at the pinned revision: `queued`, `processing`, `waiting`, `blocked`, `needs-input`, `failed`, `cancelled`, `completed`. The state identifiers are canonical and independent of the configured prefix; they are never renamed per state.
 - **Effective catalog:** the eight canonical state identifiers resolved into effective label names using the target repository’s configured `labels.prefix` (default `ai/`). With the default prefix the effective names are `ai/queued`, `ai/processing`, `ai/waiting`, `ai/blocked`, `ai/needs-input`, `ai/failed`, `ai/cancelled`, `ai/completed`. With `labels.prefix: "factory/"`, the same states resolve to `factory/queued` through `factory/completed`. The procedure never selects an alternative prefix automatically.
-- **Catalog entry:** one label object `{ name, color, description }` as defined in the canonical manifest, with `name` resolved to the effective catalog name for the configured prefix.
+- **Catalog entry:** one label object `{ name, color, description }` as defined in the canonical manifest. The trigger remains `ai`; execution-state names resolve with the configured prefix.
 - **Remote inventory:** the complete, paginated set of labels currently present on the target GitHub repository (via API), retrieved before any mutation.
 - **State assignment:** an issue’s current catalog membership for the effective catalog (at most one effective catalog label, or none). A migration or adoption must preserve the semantic assignment unless a human explicitly authorizes a conflicting-assignment resolution.
 - **Configuration drift:** any inconsistency between the configured prefix, local manifests/customization records, remote effective catalog labels, installed catalog state, or active execution configuration. Drift must be detected and reported before mutation.
@@ -71,7 +71,7 @@ When adding catalog labels to a target that tracks a local manifest (for example
 
 1. **Fetch a complete paginated remote inventory.** List all labels on the target repository using paginated API calls until every page is retrieved. Do not assume the first page is complete.
 2. **Normalize names case-insensitively** for comparison (`ai/Queued` and `ai/queued` are the same logical name to GitHub).
-3. **Resolve the effective catalog.** Read `labels.prefix` from the target repository `factory.json` (default `ai/`). Resolve the eight canonical state identifiers into effective label names with that prefix and validate the prefix before mutation. Do not select an alternative prefix automatically, including when the default namespace is occupied.
+3. **Resolve the effective catalog.** Read `labels.prefix` from the target repository `factory.json` (default `ai/`). Resolve the eight canonical state identifiers into effective label names with that prefix and validate the prefix before mutation. Include the standalone `ai` trigger unchanged. Do not select an alternative prefix automatically, including when the default namespace is occupied.
 4. **Detect pre-mutation blockers.** Before any mutation, confirm there are no unresolved blockers: insufficient permissions, invalid prefix, reserved-family conflict, configuration drift, case-insensitive collisions, incompatible existing labels, or an unapproved prefix migration. If any blocker exists, **stop** and report it; do not attempt partial remote mutations.
 5. **Classify each catalog name** against the remote inventory:
    - **Missing:** no remote label matches case-insensitively → candidate to create.
@@ -181,7 +181,7 @@ Verification means checking **actual remote state** against the pinned catalog, 
 After (and only after) authorized remote operations, or during audit without mutations:
 
 - Re-fetch the remote label inventory (paginated).
-- For each of the eight effective catalog labels, verify **remote name** (case-insensitive match to the effective catalog name), **color**, and **description** equal the pinned manifest values.
+- For the standalone `ai` trigger and each of the eight effective catalog labels, verify **remote name** (case-insensitive match to the effective catalog name), **color**, and **description** equal the pinned manifest values.
 - Confirm local manifests, applicable level-1 customization entries, and remote effective catalog labels use the same effective names.
 - Confirm no unintended changes to unrelated labels, including unrelated labels in the configured prefix namespace (spot-check or compare against your pre-mutation snapshot).
 - For migrations, verify issue state assignments: every migrated issue has the expected new effective catalog label, no unexpected old catalog label, and no conflicting assignment was silently guessed. Verify old catalog labels were not deleted unless explicitly authorized and recorded.

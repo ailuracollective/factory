@@ -2,20 +2,23 @@
 
 Version: `1.1.0`
 
-This document defines the canonical Factory execution label catalog: a
-distributable, versionable set of GitHub issue labels that represent observed
-Factory automation state. The catalog is Factory-specific and independent of the
-organization-wide label taxonomy.
+This document defines the canonical Factory label catalog: a distributable,
+versionable set of GitHub labels containing the `ai` issue trigger and the
+`ai/*` labels that represent observed Factory execution state. The catalog is
+Factory-specific and independent of the organization-wide label taxonomy.
 
 The canonical manifest is
 [`.github/labels.factory-execution.yml`](../.github/labels.factory-execution.yml).
-The manifest and this document must agree. The manifest declares the default
-`ai/` names; repositories may configure a different prefix as described below.
+The manifest and this document must agree. The manifest declares the `ai`
+trigger and default `ai/` execution-state names; repositories may configure a
+different prefix for execution-state labels as described below. The trigger
+remains `ai`.
 
 ## Catalog
 
 | Label | Color | Description |
 | --- | --- | --- |
+| `ai` | `0E8A16` | Trigger AI factory agent |
 | `ai/queued` | `CFD3D7` | Accepted work awaiting execution, including scheduled retries. |
 | `ai/processing` | `1D76DB` | Active execution. |
 | `ai/waiting` | `FBCA04` | Waiting for an external condition without human intervention. |
@@ -25,9 +28,10 @@ The manifest and this document must agree. The manifest declares the default
 | `ai/cancelled` | `6E7781` | Confirmed cancellation. |
 | `ai/completed` | `0E8A16` | Successful automated work, independent of merge or issue closure. |
 
-The catalog contains exactly these eight labels. Each label name is unique, each
-color is a quoted six-digit hexadecimal value in the manifest, and each
-description is GitHub-compatible English of at most 100 characters.
+The catalog contains the `ai` trigger and exactly eight execution-state labels.
+Each label name is unique, each color is a quoted six-digit hexadecimal value in
+the manifest, and each description is GitHub-compatible English of at most 100
+characters.
 
 ## Semantics
 
@@ -79,7 +83,11 @@ Repositories may configure the execution label namespace prefix in
 - **Resolution.** The eight canonical state identifiers resolve into effective
   label names using the configured prefix. Setting `factory/` resolves the same
   eight states under `factory/*` without changing colors or meanings.
-- **Ownership.** Ownership is limited to the eight resolved names.
+- **Trigger.** The standalone `ai` label opts an issue into Factory automation;
+  it is not an execution state and is not renamed when the execution prefix
+  changes.
+- **Ownership.** Execution-state ownership is limited to the eight resolved
+  names; Factory also owns the standalone `ai` trigger label.
   Case-insensitive collisions with existing incompatible labels are reported
   rather than silently overwritten.
 - **Independence.** Different repositories can resolve different prefixes
