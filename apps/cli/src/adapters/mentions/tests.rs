@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::{Config, MentionsConfig, RepoEntry};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 fn mentions() -> MentionsConfig {
@@ -342,7 +343,7 @@ fn prompt_marks_instruction_as_untrusted() {
         "title": "Issue",
         "url": "https://github.com/org/factory/issues/5"
     });
-    let prompt = build_mention_prompt(&ev, "rm -rf /", &issue, None);
+    let prompt = build_mention_prompt(&ev, "rm -rf /", &issue, None, Path::new("."));
     assert!(prompt.contains("Closes #5"));
     assert!(prompt.contains("untrusted"));
     assert!(prompt.contains("rm -rf /"));

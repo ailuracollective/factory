@@ -30,18 +30,18 @@ fn slugify(text: &str) -> String {
     }
 }
 
-pub fn build_prompt(issue: &Value) -> String {
+pub fn build_prompt(issue: &Value, project: &Path) -> String {
     let number = issue.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
     let url = issue
         .get("url")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim();
-    format!(
-        "Resolve GitHub issue #{number}: {url}\n\n## Task\nRead the issue with `gh issue view {number}` and inspect the relevant code before making changes. Work in the provided worktree/branch, implement the requested change, and add or update focused tests.\n\n## Verify\nRun the checks relevant to the change, then the project's required tests, linters, and build. Fix failures caused by the change and rerun them. Never skip, disable, or weaken tests. Report any unrelated or externally blocked checks accurately.\n\n## Pull request\nPush the branch and create a PR with `gh pr create`. Include a concise summary, actual check results, and `Closes #{number}` in its description. Inspect PR checks with `gh pr checks` (and `gh run view` for failures); fix change-related failures and push updates. If checks are externally blocked, report the blocker and PR URL without claiming success. If PR creation fails, report the exact error and do not claim completion. Do not merge the PR.\n",
-        number = number,
-        url = url
-    )
+    let instructions = std::fs::read_to_string(project.join(".factory/instructions/issue.md"))
+        .unwrap_or_else(|_| {
+            include_str!("../../../../../.factory/instructions/issue.md").to_string()
+        });
+    format!("Resolve GitHub issue #{number}: {url}\n\n{instructions}")
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
         .trim();
     let prompt = match prompt {
         Some(p) if !p.trim().is_empty() => p.to_string(),
-        _ => build_prompt(issue),
+        _ => build_prompt(issue, project),
     };
     let t3_bin = std::env::var("ISSUE_FACTORY_T3").unwrap_or_else(|_| "t3".to_string());
 
@@ -254,10 +254,10 @@ mod tests {
             "title": "Fix bug",
             "url": "https://example.com/issue/7"
         });
-        let p = build_prompt(&issue);
+        let p = build_prompt(&issue, Path::new("."));
         assert!(p.contains("issue #7"));
         assert!(p.contains("https://example.com/issue/7"));
-        assert!(p.contains("Closes #7"));
+        assert!(p.contains("Run the checks relevant to the change"));
         assert!(p.contains("relevant code"));
         assert!(p.contains("Do not merge"));
     }
