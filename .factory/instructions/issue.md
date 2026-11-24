@@ -4,7 +4,7 @@ Read the issue and inspect the relevant code before making changes. Work in the 
 
 Run the checks relevant to the change and report their actual results. Fix failures caused by the change; report unrelated or externally blocked checks accurately.
 
-Before opening a pull request, run the repository's required local checks and confirm they pass. Then open the PR as a draft, following the repository's `AGENTS.md` and the organization conventions it links.
+Before opening a pull request, run the repository's required local checks and confirm they pass. Then open the PR as a draft, following the repository's `AGENTS.md` and the organization conventions it links. Use the matching template under `.github/PULL_REQUEST_TEMPLATE/` for the PR body, filling every required `##` section, and apply exactly one `type/*` label (e.g. `type/feature`, `type/bug`, `type/task`) so the pull-request policy check passes.
 
 After pushing the PR branch, inspect its checks and reviews. Keep checking until every required check has completed; fix failures caused by the change, push the fixes, and check again. Do not report success or finish while required checks are pending or failing. If checks cannot complete because of an external blocker, state that clearly and include the PR URL.
 
