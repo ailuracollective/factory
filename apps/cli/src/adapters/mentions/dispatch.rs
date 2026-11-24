@@ -247,7 +247,7 @@ pub fn build_mention_prompt(
 ) -> String {
     let same_thread = prior.and_then(|s| s.thread_id.as_ref()).is_some();
     let mut base = if same_thread {
-        format!(
+        let follow_up = format!(
             "Follow-up on GitHub issue #{} ({}).\nThis is the same issue thread; keep prior context and continue from existing work.\n",
             issue
                 .get("number")
@@ -257,11 +257,15 @@ pub fn build_mention_prompt(
                 .get("url")
                 .and_then(Value::as_str)
                 .unwrap_or(&event.url)
+        );
+        format!(
+            "{}\n{follow_up}",
+            crate::agent::build_prompt(issue, project)
         )
     } else {
         crate::agent::build_prompt(issue, project)
     };
-    if let Some(pr_url) = prior.and_then(|s| s.pr_url.as_deref()) {
+    if same_thread && let Some(pr_url) = prior.and_then(|s| s.pr_url.as_deref()) {
         base.push_str(&format!(
             "Linked PR: {pr_url}\nUse `gh pr view --repo {repo} {pr_url}` for PR details.\n",
             repo = event.repo

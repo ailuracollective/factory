@@ -41,7 +41,13 @@ pub fn build_prompt(issue: &Value, project: &Path) -> String {
         .unwrap_or_else(|_| {
             include_str!("../../../../../.factory/instructions/issue.md").to_string()
         });
-    format!("Resolve GitHub issue #{number}: {url}\n\n{instructions}")
+    let conventions_path = project.join(".agents/organization-conventions.md");
+    let conventions = std::fs::read_to_string(&conventions_path).unwrap_or_else(|_| {
+        include_str!("../../../../../.agents/organization-conventions.md").to_string()
+    });
+    format!(
+        "Resolve GitHub issue #{number}: {url}\n\n{instructions}\n\n## Organization conventions\n\n{conventions}"
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -258,6 +264,9 @@ mod tests {
         assert!(p.contains("issue #7"));
         assert!(p.contains("https://example.com/issue/7"));
         assert!(p.contains("Run the checks relevant to the change"));
+        assert!(p.contains("required headings from the matching PR template"));
+        assert!(p.contains("## Organization conventions"));
+        assert!(p.contains("All CI checks pass"));
         assert!(p.contains("relevant code"));
         assert!(p.contains("Do not merge"));
     }
