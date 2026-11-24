@@ -151,3 +151,71 @@ fn restart_with_propagates_failure() {
     let err = super::restart_with(&m).unwrap_err();
     assert!(err.to_string().contains("failed to restart"));
 }
+
+#[test]
+fn execution_logs_unknown_execution_is_distinguishable() {
+    let _lock = crate::state::tests::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let db = std::env::temp_dir().join(format!(
+        "factory_cli_logs_{}_{}.db",
+        std::process::id(),
+        uuid::Uuid::now_v7().simple()
+    ));
+    let prev = std::env::var("ISSUE_FACTORY_DB_FILE").ok();
+    unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", &db) };
+    let err = super::execution_logs("exec_missing", false, 200).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("execution not found: exec_missing")
+    );
+    match prev {
+        Some(v) => unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", v) },
+        None => unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") },
+    }
+    let _ = std::fs::remove_file(&db);
+}
+
+#[test]
+fn execution_logs_unavailable_and_empty_are_distinguishable() {
+    let _lock = crate::state::tests::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let db = std::env::temp_dir().join(format!(
+        "factory_cli_logs2_{}_{}.db",
+        std::process::id(),
+        uuid::Uuid::now_v7().simple()
+    ));
+    let prev = std::env::var("ISSUE_FACTORY_DB_FILE").ok();
+    unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", &db) };
+
+    let rec = crate::execution::create_execution(
+        "org/repo#1",
+        "org/repo",
+        1,
+        1,
+        Some("cli"),
+        Some("local"),
+        None,
+    )
+    .unwrap();
+
+    let err = super::execution_logs(&rec.execution_id, false, 200).unwrap_err();
+    assert!(err.to_string().contains(&format!(
+        "logs unavailable for execution: {}",
+        rec.execution_id
+    )));
+
+    crate::execution::logs::ensure_logs_dir().unwrap();
+    std::fs::File::create(crate::execution::logs::log_path(&rec.execution_id)).unwrap();
+    // empty is distinguishable: returns Ok and prints a message (we assert no error here)
+    let ok = super::execution_logs(&rec.execution_id, false, 200);
+    assert!(ok.is_ok());
+
+    match prev {
+        Some(v) => unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", v) },
+        None => unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") },
+    }
+    let _ = std::fs::remove_dir_all(db.parent().unwrap().join("logs"));
+    let _ = std::fs::remove_file(&db);
+}

@@ -31,6 +31,11 @@ Cloudflare Worker (Rust, wasm32-unknown-unknown). Responsibilities:
 
 No Tokio/SQLx. Use `worker` crate, D1 bindings, async/await. Axum may be used via `http` feature for routing if needed; prefer `worker::Router` for simplicity.
 
+Execution logs are captured locally by the CLI runner for executions it runs,
+including Gateway-origin jobs dispatched to that runner. The Gateway does not
+currently store or serve execution log streams; remote log availability is
+limited to the runner/local machine holding the execution log files.
+
 ## Data flow (MVP)
 
 GitHub -> Gateway webhook -> authorize -> persist job (D1) -> Gateway pushes job to runner webhook -> runs agent -> reports result -> Gateway updates GitHub (comment/PR) with minimal permissions.

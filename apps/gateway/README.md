@@ -46,6 +46,14 @@ Run these from `apps/gateway`:
 
 `.dev.vars` is ignored by Git; never commit secrets.
 
+## Execution logs
+
+Execution logs are captured by the CLI runner on the machine that executes a job.
+The Gateway stores job metadata and status, but it does not currently store or
+serve execution log streams. Remote log availability is therefore limited to the
+runner/local machine that holds the log files; retention is local and file-based
+until removed by the operator or state directory cleanup.
+
 ## More
 
 - Root overview: [../../README.md](../../README.md)

@@ -176,6 +176,15 @@ enum ExecutionAction {
         #[arg(long)]
         json: bool,
     },
+    /// Show logs for an execution
+    Logs {
+        /// Execution ID
+        execution_id: String,
+        #[arg(short, long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value = "200")]
+        lines: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -406,6 +415,11 @@ fn main() -> ExitCode {
             ExecutionAction::Show { execution_id, json } => {
                 cli::execution_show(&execution_id, json)
             }
+            ExecutionAction::Logs {
+                execution_id,
+                follow,
+                lines,
+            } => cli::execution_logs(&execution_id, follow, lines),
         },
     };
     match result {
