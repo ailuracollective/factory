@@ -41,30 +41,35 @@ async fn load_state_db(path: PathBuf) -> Result<HashMap<String, IssueState>> {
 }
 
 async fn save_state_db(path: PathBuf, issues: HashMap<String, IssueState>) -> Result<()> {
+    use sea_orm::TransactionTrait;
     let db = connect(&path).await?;
-    IssueEntity::delete_many().exec(&db).await?;
-
-    for (key, rec) in issues {
-        let project_id = if let Some(name) = project_name_from_key(&key) {
-            find_project_id(&db, &name).await
-        } else {
-            None
-        };
-        IssueActiveModel {
-            id: Set(Uuid::now_v7()),
-            project_id: Set(project_id),
-            issue_key: Set(key),
-            status: Set(rec.status.as_str().to_string()),
-            attempts: Set(rec.attempts as i32),
-            last_error: Set(rec.last_error),
-            thread_id: Set(rec.thread_id),
-            pr_url: Set(rec.pr_url),
-            updated_at: Set(rec.updated_at as i64),
-        }
-        .insert(&db)
-        .await?;
-    }
-
+    db.transaction::<_, (), sea_orm::DbErr>(|txn| {
+        Box::pin(async move {
+            IssueEntity::delete_many().exec(txn).await?;
+            for (key, rec) in issues {
+                let project_id = if let Some(name) = project_name_from_key(&key) {
+                    find_project_id(txn, &name).await
+                } else {
+                    None
+                };
+                IssueActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    project_id: Set(project_id),
+                    issue_key: Set(key),
+                    status: Set(rec.status.as_str().to_string()),
+                    attempts: Set(rec.attempts as i32),
+                    last_error: Set(rec.last_error),
+                    thread_id: Set(rec.thread_id),
+                    pr_url: Set(rec.pr_url),
+                    updated_at: Set(rec.updated_at as i64),
+                }
+                .insert(txn)
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
     Ok(())
 }
 

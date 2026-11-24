@@ -44,11 +44,12 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
         Some(p) if p.exists() => p,
         _ => {
             println!("No project path for {}", repo);
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::Client::new();
             let _ = client
                 .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
                 .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "no project path"}))
-                .send();
+                .send()
+                .await;
             return Ok(());
         }
     };
@@ -79,15 +80,15 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
     let token_hb = token.clone();
     let job_hb = job_id.clone();
     let exec_hb = exec_id.clone();
-    let hb = std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::new();
+    let hb = tokio::spawn(async move {
+        let client = reqwest::Client::new();
         while !stop_hb.load(std::sync::atomic::Ordering::Relaxed) {
-            let resp = client
+            if let Ok(r) = client
                 .post(format!("{}/jobs/{}/heartbeat", gw_hb, encode_path_segment(&job_hb)))
                 .json(&serde_json::json!({"runner_id": runner_hb, "token": token_hb, "status": "running"}))
-                .send();
-            if let Ok(r) = resp
-                && let Ok(body) = r.json::<serde_json::Value>()
+                .send()
+                .await
+                && let Ok(body) = r.json::<serde_json::Value>().await
             {
                 let job_status = body
                     .get("job_status")
@@ -108,7 +109,7 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
                 if stop_hb.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
     });
@@ -124,9 +125,9 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
     });
 
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    let _ = hb.join();
+    let _ = hb.await;
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     match launch {
         Ok(tid) => {
             let cancelled = exec_id
@@ -140,7 +141,7 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
                 let _ = client
                     .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
                     .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "cancelled"}))
-                    .send();
+                    .send().await;
                 println!("Cancelled job {}", job_id);
             } else {
                 let pr_url = crate::mentions::discover_pr_url(&repo, number as u64);
@@ -158,7 +159,7 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
                 let _ = client
                     .post(format!("{}/jobs/{}/complete", gw, encode_path_segment(&job_id)))
                     .json(&serde_json::json!({"runner_id": runner_id, "token": token, "thread_id": tid}))
-                    .send();
+                    .send().await;
                 println!("Completed job {} -> {}", job_id, tid);
             }
         }
@@ -174,7 +175,7 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
                 let _ = client
                     .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
                     .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": "cancelled"}))
-                    .send();
+                    .send().await;
                 println!("Cancelled job {}", job_id);
             } else {
                 if let Some(ref id) = exec_id {
@@ -183,7 +184,8 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
                 let _ = client
                     .post(format!("{}/jobs/{}/fail", gw, encode_path_segment(&job_id)))
                     .json(&serde_json::json!({"runner_id": runner_id, "token": token, "error": e}))
-                    .send();
+                    .send()
+                    .await;
                 println!("Failed job {}: {}", job_id, e);
             }
         }

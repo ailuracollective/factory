@@ -24,12 +24,32 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn notify(State(state): State<AppState>, Json(n): Json<Notification>) -> &'static str {
+async fn notify(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(n): Json<Notification>,
+) -> (axum::http::StatusCode, &'static str) {
+    let configured = std::env::var("BOT_NOTIFY_SECRET").unwrap_or_default();
+    if !configured.is_empty() {
+        let provided = headers
+            .get("x-bot-secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let ok = provided.len() == configured.len()
+            && provided
+                .bytes()
+                .zip(configured.bytes())
+                .fold(0u8, |a, (x, y)| a | (x ^ y))
+                == 0;
+        if !ok {
+            return (axum::http::StatusCode::UNAUTHORIZED, "unauthorized");
+        }
+    }
     match handler::handle(state.sink.as_ref(), n).await {
-        Ok(()) => "received",
+        Ok(()) => (axum::http::StatusCode::OK, "received"),
         Err(e) => {
             tracing::warn!("{}", e);
-            "error"
+            (axum::http::StatusCode::BAD_REQUEST, "error")
         }
     }
 }

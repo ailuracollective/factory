@@ -111,13 +111,15 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
             let _ = execution::mark_cancel_confirmed(exec_id, "cancelled_before_launch");
             return Err("execution cancelled before launch".to_string());
         }
-        let _ = execution::transition_execution(
+        if let Err(e) = execution::transition_execution(
             exec_id,
             Some(execution::ExecutionStatus::Queued),
             execution::ExecutionStatus::Running,
             None,
             None,
-        );
+        ) {
+            tracing::warn!(execution_id = %exec_id, error = %e, "failed to mark execution running");
+        }
     }
 
     if let Some(thread_id) = existing_thread.filter(|t| !t.trim().is_empty()) {

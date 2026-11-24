@@ -8,25 +8,8 @@ fn db_path() -> PathBuf {
     state::state_file()
 }
 
-fn run_async<F, T>(fut: F) -> T
-where
-    F: std::future::Future<Output = T> + Send,
-    T: Send,
-{
-    std::thread::scope(|s| {
-        let handle = s.spawn(|| {
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(fut)
-        });
-        handle.join().expect("worker thread panicked")
-    })
-}
-
 async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display())).await?;
+    let db = crate::state::connect_sqlite(path).await?;
     let schema = Schema::new(DbBackend::Sqlite);
     let mut stmt = schema.create_table_from_entity(ExecutionEntity);
     stmt.if_not_exists();

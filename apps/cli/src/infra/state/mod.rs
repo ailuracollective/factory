@@ -5,7 +5,6 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -142,15 +141,6 @@ pub enum IssueStatus {
 }
 
 impl IssueStatus {
-    /// Guard centralizado de transiciones de la FSM de issues.
-    pub fn can_transition_to(self, to: Self) -> bool {
-        use IssueStatus::*;
-        matches!(
-            (self, to),
-            (Pending, Running) | (Running, Completed) | (Running, Failed) | (Failed, Pending)
-        )
-    }
-
     fn as_str(self) -> &'static str {
         match self {
             IssueStatus::Pending => "pending",
@@ -223,17 +213,18 @@ pub fn state_file() -> PathBuf {
         .join("factory.db")
 }
 
-fn db_url(path: &std::path::Path) -> String {
+pub fn db_url(path: &std::path::Path) -> String {
     format!("sqlite://{}?mode=rwc", path.display())
 }
 
-fn ensure_parent(path: &std::path::Path) {
+pub async fn connect_sqlite(path: &std::path::Path) -> Result<DatabaseConnection> {
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        let _ = std::fs::create_dir_all(parent);
     }
+    Ok(Database::connect(db_url(path)).await?)
 }
 
-fn run_async<F, T>(fut: F) -> T
+pub fn run_async<F, T>(fut: F) -> T
 where
     F: std::future::Future<Output = T> + Send,
     T: Send,
@@ -248,8 +239,7 @@ where
 }
 
 async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
-    ensure_parent(path);
-    let db = Database::connect(db_url(path)).await?;
+    let db = connect_sqlite(path).await?;
     // Remove legacy config table if present.
     let _ = db.execute_unprepared("DROP TABLE IF EXISTS config").await;
     let schema = Schema::new(DbBackend::Sqlite);

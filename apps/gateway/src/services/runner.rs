@@ -54,12 +54,13 @@ pub async fn handle_register(req: &Request, env: &worker::Env) -> Response {
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    let callback_secret_hash = callback_secret.map(auth::hash_token);
     if runners::register(
         &conn,
         &body.runner_id,
         &auth::hash_token(&token),
         callback_url,
-        callback_secret,
+        callback_secret_hash.as_deref(),
         ts,
     )
     .await
@@ -205,6 +206,8 @@ pub async fn handle_fail(Path(id): Path<String>, req: &Request, env: &worker::En
 }
 
 pub async fn dispatch_pending(conn: &sea_orm::DatabaseConnection) {
+    let ts = infra::time::now_ts();
+    let _ = jobs::requeue_expired(conn, ts).await;
     for _ in 0..10 {
         let Some(id) = jobs::find_pending(conn).await.ok().flatten() else {
             break;
@@ -216,6 +219,8 @@ pub async fn dispatch_pending(conn: &sea_orm::DatabaseConnection) {
 }
 
 pub async fn dispatch_job(conn: &sea_orm::DatabaseConnection, job_id: &str) -> bool {
+    let ts = infra::time::now_ts();
+    let _ = jobs::requeue_expired(conn, ts).await;
     let job = match jobs::get(conn, job_id).await {
         Ok(Some(j)) => j,
         _ => return false,

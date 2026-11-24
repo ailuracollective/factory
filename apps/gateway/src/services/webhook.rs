@@ -110,13 +110,27 @@ pub async fn handle_webhook(req: &Request, env: &worker::Env) -> ohkami::Respons
             503,
         );
     }
-    if !validation::repo_is_allowed(&infra::env_str(env, "GITHUB_ALLOWED_REPOS"), &repo) {
+    let allowed_repos_cfg = infra::env_str(env, "GITHUB_ALLOWED_REPOS");
+    if allowed_repos_cfg.trim().is_empty() {
+        return json_response(
+            &serde_json::json!({"error": "configuration error", "reason": "GITHUB_ALLOWED_REPOS is not configured"}),
+            503,
+        );
+    }
+    if !validation::repo_is_allowed(&allowed_repos_cfg, &repo) {
         return json_response(
             &serde_json::json!({"error": "forbidden", "reason": "repo not allowed"}),
             403,
         );
     }
-    if !validation::installation_allowed(&infra::env_str(env, "GITHUB_INSTALLATION_ID"), &payload) {
+    let installation_cfg = infra::env_str(env, "GITHUB_INSTALLATION_ID");
+    if installation_cfg.trim().is_empty() {
+        return json_response(
+            &serde_json::json!({"error": "configuration error", "reason": "GITHUB_INSTALLATION_ID is not configured"}),
+            503,
+        );
+    }
+    if !validation::installation_allowed(&installation_cfg, &payload) {
         return json_response(
             &serde_json::json!({"error": "forbidden", "reason": "installation not allowed"}),
             403,

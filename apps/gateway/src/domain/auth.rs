@@ -27,7 +27,10 @@ pub fn verify_signature(secret: &str, body: &[u8], header: &str) -> bool {
     };
     mac.update(body);
     let result = mac.finalize().into_bytes();
-    let expected = hex::decode(expected_hex).unwrap_or_default();
+    let expected = match hex::decode(expected_hex) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
     constant_time_eq(&expected, &result)
 }
 

@@ -41,7 +41,7 @@ pub fn create_execution(
         updated_at: state::now(),
     };
     let rec_clone = rec.clone();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let am = ExecutionActiveModel {
             execution_id: Set(rec_clone.execution_id.clone()),
@@ -82,7 +82,7 @@ pub fn create_execution(
 pub fn get_execution(execution_id: &str) -> Result<Option<ExecutionRecord>> {
     let path = db_path();
     let id = execution_id.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = ExecutionEntity::find_by_id(id).one(&db).await?;
         Ok(row.map(ExecutionRecord::from_model))
@@ -91,7 +91,7 @@ pub fn get_execution(execution_id: &str) -> Result<Option<ExecutionRecord>> {
 
 pub fn list_executions(limit: u64) -> Result<Vec<ExecutionRecord>> {
     let path = db_path();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let rows = ExecutionEntity::find()
             .order_by_desc(ExecutionColumn::StartedAt)
@@ -118,7 +118,7 @@ pub fn list_executions_filtered(
     let status = status.map(|s| s.to_string());
     let source = source.map(|s| s.to_string());
     let cursor = cursor.map(|s| s.to_string());
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let mut q = ExecutionEntity::find();
         if let Some(r) = &repo {
@@ -172,7 +172,7 @@ pub fn list_executions_filtered(
 pub fn list_cancellable_for_issue(repo: &str, issue_number: i64) -> Result<Vec<ExecutionRecord>> {
     let path = db_path();
     let repo = repo.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let rows = ExecutionEntity::find()
             .filter(ExecutionColumn::Repo.eq(repo))
@@ -188,7 +188,7 @@ pub fn list_cancellable_for_issue(repo: &str, issue_number: i64) -> Result<Vec<E
 pub fn list_cancellable_for_repo(repo: &str) -> Result<Vec<ExecutionRecord>> {
     let path = db_path();
     let repo = repo.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let rows = ExecutionEntity::find()
             .filter(ExecutionColumn::Repo.eq(repo))
@@ -216,7 +216,7 @@ pub fn transition_execution(
     let id = execution_id.to_string();
     let reason = reason.map(|s| s.to_string());
     let thread_id = thread_id.map(|s| s.to_string());
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = ExecutionEntity::find_by_id(id.clone())
             .one(&db)
@@ -269,7 +269,7 @@ pub fn request_cancel(
     let id = execution_id.to_string();
     let requested_by = requested_by.to_string();
     let reason = reason.map(|s| s.to_string());
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = ExecutionEntity::find_by_id(id.clone())
             .one(&db)
@@ -343,7 +343,7 @@ pub fn mark_cancel_confirmed(execution_id: &str, outcome: &str) -> Result<Option
     let path = db_path();
     let id = execution_id.to_string();
     let outcome = outcome.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
@@ -381,7 +381,7 @@ pub fn mark_cancel_unconfirmed(
     let path = db_path();
     let id = execution_id.to_string();
     let outcome = outcome.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
@@ -409,7 +409,7 @@ pub fn complete_execution(
     let id = execution_id.to_string();
     let thread_id = thread_id.map(|s| s.to_string());
     let pr_url = pr_url.map(|s| s.to_string());
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
@@ -422,7 +422,7 @@ pub fn complete_execution(
         let now = state::now() as i64;
         db.execute_raw(sea_orm::Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "UPDATE executions SET status='completed', thread_id=COALESCE(?, thread_id), pr_url=COALESCE(?, pr_url), updated_at=?, ended_at=? WHERE execution_id=? AND status='running'",
+            "UPDATE executions SET status='completed', thread_id=COALESCE(?, thread_id), pr_url=COALESCE(?, pr_url), updated_at=?, ended_at=? WHERE execution_id=? AND status IN ('queued','running')",
             [
                 thread_id.into(),
                 pr_url.into(),
@@ -444,7 +444,7 @@ pub fn fail_execution(execution_id: &str, error: &str) -> Result<Option<Executio
     let path = db_path();
     let id = execution_id.to_string();
     let error = error.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         let row = match ExecutionEntity::find_by_id(id.clone()).one(&db).await? {
             Some(r) => r,
@@ -457,7 +457,7 @@ pub fn fail_execution(execution_id: &str, error: &str) -> Result<Option<Executio
         let now = state::now() as i64;
         db.execute_raw(sea_orm::Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "UPDATE executions SET status='failed', reason=?, updated_at=?, ended_at=? WHERE execution_id=? AND status='running'",
+            "UPDATE executions SET status='failed', reason=?, updated_at=?, ended_at=? WHERE execution_id=? AND status IN ('queued','running')",
             [error.into(), now.into(), now.into(), id.clone().into()],
         ))
         .await?;

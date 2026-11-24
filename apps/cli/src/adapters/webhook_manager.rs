@@ -20,6 +20,18 @@ fn run(cmd: &[String]) -> (i32, String) {
     }
 }
 
+pub fn post_issue_comment(repo: &str, number: u64, body: &str) -> bool {
+    let path = format!("repos/{}/issues/{}/comments", repo, number);
+    let body_arg = format!("body={body}");
+    match std::process::Command::new("gh")
+        .args(["api", "-X", "POST", &path, "-f", &body_arg])
+        .output()
+    {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
+}
+
 pub fn create_webhook(repo_slug: &str, url: &str, secret: &str) -> Result<Option<u64>> {
     let path = format!("repos/{}/hooks", repo_slug);
     let url_arg = format!("config[url]={}", url);

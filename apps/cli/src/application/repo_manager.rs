@@ -55,64 +55,63 @@ pub fn register_t3(project_path: &std::path::Path) -> bool {
 }
 
 pub fn sync_labels(repo_slug: &str) -> u32 {
-    let url =
-        "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml";
-    let labels_file = std::env::temp_dir().join("labels.yml");
-    // download
-    let status = Command::new("curl")
-        .args(["-s", "-o", labels_file.to_str().unwrap(), url])
-        .status();
-    if status.map(|s| !s.success()).unwrap_or(true) {
-        return 0;
-    }
-    let text = match fs::read_to_string(&labels_file) {
-        Ok(t) => t,
-        Err(_) => return 0,
-    };
-    // simple regex parse
-    let re = regex::Regex::new(
+    let Ok(label_re) = regex::Regex::new(
         r#"- name: "([^"]+)"\s*\n\s*color: "([^"]+)"\s*\n\s*description: "([^"]*)""#,
-    );
-    let re = match re {
-        Ok(r) => r,
-        Err(_) => return 0,
+    ) else {
+        return 0;
     };
     let mut count = 0;
-    for cap in re.captures_iter(&text) {
-        let name = cap.get(1).unwrap().as_str();
-        let color = cap.get(2).unwrap().as_str();
-        let desc = cap.get(3).unwrap().as_str();
-        run(
-            &[
-                "gh",
-                "label",
-                "create",
-                name,
-                "--color",
-                color,
-                "--description",
-                desc,
-                "--repo",
-                repo_slug,
-            ],
-            None,
-        );
-        run(
-            &[
-                "gh",
-                "label",
-                "edit",
-                name,
-                "--color",
-                color,
-                "--description",
-                desc,
-                "--repo",
-                repo_slug,
-            ],
-            None,
-        );
-        count += 1;
+    for url in [
+        "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml",
+        "https://raw.githubusercontent.com/ailuracollective/factory/main/.github/labels.factory-trigger.yml",
+        "https://raw.githubusercontent.com/ailuracollective/factory/main/.github/labels.factory-execution.yml",
+    ] {
+        let labels_file = std::env::temp_dir().join("factory-labels.yml");
+        let status = Command::new("curl")
+            .args(["-fsSL", "-o", labels_file.to_str().unwrap(), url])
+            .status();
+        if status.map(|s| !s.success()).unwrap_or(true) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&labels_file) else {
+            continue;
+        };
+        for cap in label_re.captures_iter(&text) {
+            let name = cap.get(1).unwrap().as_str();
+            let color = cap.get(2).unwrap().as_str();
+            let desc = cap.get(3).unwrap().as_str();
+            run(
+                &[
+                    "gh",
+                    "label",
+                    "create",
+                    name,
+                    "--color",
+                    color,
+                    "--description",
+                    desc,
+                    "--repo",
+                    repo_slug,
+                ],
+                None,
+            );
+            run(
+                &[
+                    "gh",
+                    "label",
+                    "edit",
+                    name,
+                    "--color",
+                    color,
+                    "--description",
+                    desc,
+                    "--repo",
+                    repo_slug,
+                ],
+                None,
+            );
+            count += 1;
+        }
     }
     count
 }

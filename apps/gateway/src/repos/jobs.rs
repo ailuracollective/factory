@@ -45,6 +45,17 @@ pub async fn find_pending(conn: &DatabaseConnection) -> Result<Option<String>, s
     Ok(row.map(|r| r.id))
 }
 
+pub async fn requeue_expired(conn: &DatabaseConnection, now: i64) -> Result<u64, sea_orm::DbErr> {
+    let res = conn
+        .execute_raw(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "UPDATE jobs SET status='pending', runner_id=NULL, lease_until=NULL, updated_at=? WHERE status IN ('claimed','running') AND lease_until IS NOT NULL AND lease_until < ?",
+            [now.into(), now.into()],
+        ))
+        .await?;
+    Ok(res.rows_affected())
+}
+
 pub async fn claim(
     conn: &DatabaseConnection,
     jid: &str,

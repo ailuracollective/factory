@@ -8,7 +8,7 @@ use axum::{
 };
 use hmac::{Hmac, Mac};
 use serde_json::Value;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -91,13 +91,20 @@ async fn webhook(
     headers: HeaderMap,
     body: String,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if !is_allowed_ip(addr.ip()) {
+    let secret = &state.config.webhook.secret;
+    // Only enforce the IP allowlist in the unsigned (dev) mode; a valid
+    // signature is sufficient authentication in production.
+    if secret.is_empty()
+        && !std::env::var("ISSUE_FACTORY_ALLOW_UNSIGNED_WEBHOOKS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        && !is_allowed_ip(addr.ip())
+    {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"error": "ip not allowed"})),
         );
     }
-    let secret = &state.config.webhook.secret;
     let sig_header = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())
@@ -164,7 +171,12 @@ async fn runner_job(
         .get("x-factory-dispatch-secret")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if secret.is_empty() || provided != secret {
+    let expected = if secret.is_empty() {
+        String::new()
+    } else {
+        hex::encode(Sha256::digest(secret.as_bytes()))
+    };
+    if expected.is_empty() || provided.is_empty() || provided != expected {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "bad secret"})),
@@ -192,7 +204,10 @@ async fn runner_job(
 
 fn verify_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
     if secret.is_empty() {
-        return true;
+        // Fail closed by default; allow unsigned webhooks only for local dev.
+        return std::env::var("ISSUE_FACTORY_ALLOW_UNSIGNED_WEBHOOKS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
     }
     if !signature_header.starts_with("sha256=") {
         return false;

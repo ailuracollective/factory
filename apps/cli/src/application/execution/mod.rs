@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend,
-    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Schema, Set, sea_query::OnConflict,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait,
+    QueryFilter, QueryOrder, QuerySelect, Schema, Set, sea_query::OnConflict,
 };
 use serde::{Deserialize, Serialize};
 

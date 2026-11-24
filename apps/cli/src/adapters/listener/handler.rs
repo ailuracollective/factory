@@ -322,19 +322,8 @@ fn report_launch_failure(repo: &str, number: i64, error: &str, assignees: &[Stri
         mentions,
         detail
     );
-    let path = format!("repos/{repo}/issues/{number}/comments");
-    let body_arg = format!("body={body}");
-    let output = std::process::Command::new("gh")
-        .args(["api", "-X", "POST", &path, "-f", &body_arg])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => tracing::warn!(
-            repo = %repo,
-            "failed to post failure comment: {}",
-            String::from_utf8_lossy(&o.stderr).trim()
-        ),
-        Err(e) => tracing::warn!(repo = %repo, "failed to post failure comment: {e}"),
+    if !crate::webhook_manager::post_issue_comment(repo, number as u64, &body) {
+        tracing::warn!(repo = %repo, "failed to post failure comment");
     }
 }
 

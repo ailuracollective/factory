@@ -14,7 +14,7 @@ pub struct ExecutionAuditEvent {
 
 pub fn append_audit(event: ExecutionAuditEvent) -> Result<()> {
     let path = db_path();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         db.execute_unprepared(
             "CREATE TABLE IF NOT EXISTS execution_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT, action TEXT, target TEXT, outcome TEXT, detail TEXT)",
@@ -41,7 +41,7 @@ pub fn append_audit(event: ExecutionAuditEvent) -> Result<()> {
 pub fn list_audit(target: &str, limit: u64) -> Result<Vec<ExecutionAuditEvent>> {
     let path = db_path();
     let target = target.to_string();
-    run_async(async move {
+    crate::state::run_async(async move {
         let db = connect(&path).await?;
         db.execute_unprepared(
             "CREATE TABLE IF NOT EXISTS execution_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT, action TEXT, target TEXT, outcome TEXT, detail TEXT)",

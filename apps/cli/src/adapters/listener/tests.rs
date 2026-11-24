@@ -3,7 +3,7 @@ use serde_json::json;
 
 #[test]
 fn verify_signature_empty_secret() {
-    assert!(verify_signature("", b"hello", ""));
+    assert!(!verify_signature("", b"hello", ""));
 }
 
 #[test]

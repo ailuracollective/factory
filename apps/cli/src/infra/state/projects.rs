@@ -27,20 +27,27 @@ async fn load_projects_db(path: PathBuf) -> Result<Vec<crate::config::RepoEntry>
 }
 
 async fn sync_projects_db(path: PathBuf, repos: Vec<crate::config::RepoEntry>) -> Result<()> {
+    use sea_orm::TransactionTrait;
     let db = connect(&path).await?;
-    ProjectEntity::delete_many().exec(&db).await?;
-    for r in repos {
-        ProjectActiveModel {
-            id: Set(Uuid::now_v7().to_string()),
-            name: Set(r.name),
-            path: Set(r.path),
-            github: Set(r.github),
-            hook_id: Set(r.hook_id.map(|v| v as i64)),
-            enabled: Set(if r.enabled { 1 } else { 0 }),
-        }
-        .insert(&db)
-        .await?;
-    }
+    db.transaction::<_, (), sea_orm::DbErr>(|txn| {
+        Box::pin(async move {
+            ProjectEntity::delete_many().exec(txn).await?;
+            for r in repos {
+                ProjectActiveModel {
+                    id: Set(Uuid::now_v7().to_string()),
+                    name: Set(r.name),
+                    path: Set(r.path),
+                    github: Set(r.github),
+                    hook_id: Set(r.hook_id.map(|v| v as i64)),
+                    enabled: Set(if r.enabled { 1 } else { 0 }),
+                }
+                .insert(txn)
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
     Ok(())
 }
 pub(super) fn project_name_from_key(key: &str) -> Option<String> {
@@ -53,7 +60,10 @@ pub(super) fn project_name_from_key(key: &str) -> Option<String> {
     }
 }
 
-pub(super) async fn find_project_id(db: &DatabaseConnection, name: &str) -> Option<Uuid> {
+pub(super) async fn find_project_id<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    name: &str,
+) -> Option<Uuid> {
     let row = ProjectEntity::find()
         .filter(ProjectColumn::Name.eq(name))
         .one(db)

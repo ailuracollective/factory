@@ -172,19 +172,8 @@ impl Dispatcher for AgentDispatcher {
             format!("{mentions}\n\n")
         };
         let body = format!("{REPORT_MARKER}\n{prefix}Factory: {status}");
-        let path = format!("repos/{}/issues/{}/comments", event.repo, event.number);
-        let body_arg = format!("body={body}");
-        let output = Command::new("gh")
-            .args(["api", "-X", "POST", &path, "-f", &body_arg])
-            .output();
-        match output {
-            Ok(o) if o.status.success() => {}
-            Ok(o) => tracing::warn!(
-                repo = %event.repo,
-                "failed to report status: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            ),
-            Err(e) => tracing::warn!(repo = %event.repo, "failed to report status: {e}"),
+        if !crate::webhook_manager::post_issue_comment(&event.repo, event.number, &body) {
+            tracing::warn!(repo = %event.repo, "failed to report status");
         }
     }
 }
