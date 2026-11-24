@@ -351,6 +351,40 @@ fn prompt_marks_instruction_as_untrusted() {
 }
 
 #[test]
+fn fresh_comment_prompt_includes_repository_conventions_and_check_contract() {
+    let ev = event("16", "@alice factory fix it", "2024-01-01T00:00:00Z");
+    let issue = serde_json::json!({
+        "number": 5,
+        "title": "Issue",
+        "url": "https://github.com/org/factory/issues/5"
+    });
+    let prompt = build_mention_prompt(&ev, "fix it", &issue, None, Path::new("."));
+    assert!(prompt.contains("applicable `AGENTS.md`"));
+    assert!(prompt.contains("## Organization conventions"));
+    assert!(prompt.contains("`gh pr checks` reporting no checks is unresolved, not success"));
+    assert!(prompt.contains("mark it ready for review before awaiting CI"));
+}
+
+#[test]
+fn follow_up_comment_prompt_keeps_instruction_to_read_repository_conventions() {
+    let ev = event("17", "@alice factory continue", "2024-01-01T00:00:00Z");
+    let issue = serde_json::json!({
+        "number": 5,
+        "title": "Issue",
+        "url": "https://github.com/org/factory/issues/5"
+    });
+    let prior = crate::state::IssueState {
+        thread_id: Some("thread-5".to_string()),
+        ..Default::default()
+    };
+    let prompt = build_mention_prompt(&ev, "continue", &issue, Some(&prior), Path::new("."));
+    assert!(prompt.contains("Follow-up on GitHub issue #5"));
+    assert!(prompt.contains("## Organization conventions"));
+    assert!(prompt.contains("reporting no checks is unresolved"));
+    assert!(prompt.contains("linked organization conventions"));
+}
+
+#[test]
 fn sqlite_store_persists_dedupe_and_audit() {
     let _lock = crate::state::tests::TEST_ENV_LOCK
         .lock()
