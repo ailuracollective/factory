@@ -1,11 +1,12 @@
-# Factory execution label catalog — canonical, distributable manifest.
+# Factory labels — canonical, distributable manifest.
 #
 # Version: 1.1.0
-# Catalog: factory-execution-labels
-# Scope: GitHub issue labels representing observed Factory automation state.
+# Catalog: factory-labels
+# Scope: the Factory issue trigger and observed execution state.
 #
-# This manifest is independent of the organization-wide label taxonomy and is
-# compatible with level-1 extensions in `.github/standards.local.yml`.
+# The `ai` label opts issues into Factory automation; `ai/*` labels report
+# execution state. This manifest is independent of the organization-wide label
+# taxonomy and is compatible with level-1 extensions in `.github/standards.local.yml`.
 # External repositories may copy this file and apply the labels it declares.
 #
 # Apply labels from the repository root after reviewing remote differences:
@@ -13,8 +14,12 @@
 #   yq -r '.[] | "gh label create \"\(.name)\" --color \"\(.color)\" --description \"\(.description)\" --force"' \
 #     .github/labels.factory-execution.yml | sh
 #
-# Quote every color. Labels are observational projections, not commands or
-# authoritative execution state. See docs/factory-execution-label-standard.md.
+# Quote every color. `ai/*` labels are observational projections, not commands
+# or authoritative execution state. See docs/factory-execution-label-standard.md.
+
+- name: "ai"
+  color: "0E8A16"
+  description: "Trigger AI factory agent"
 
 - name: "ai/queued"
   color: "CFD3D7"

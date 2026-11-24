@@ -63,7 +63,6 @@ pub fn sync_labels(repo_slug: &str) -> u32 {
     let mut count = 0;
     for url in [
         "https://raw.githubusercontent.com/ailuracollective/standards/main/.github/labels.yml",
-        "https://raw.githubusercontent.com/ailuracollective/factory/main/.github/labels.factory-trigger.yml",
         "https://raw.githubusercontent.com/ailuracollective/factory/main/.github/labels.factory-execution.yml",
     ] {
         let labels_file = std::env::temp_dir().join("factory-labels.yml");
