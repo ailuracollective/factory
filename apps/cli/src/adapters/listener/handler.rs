@@ -272,13 +272,13 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
             let _ =
                 crate::execution::complete_execution(id, thread_id.as_deref(), pr_url.as_deref());
         }
-        // Launch succeeded; the agent may still be running. Keep the
-        // observational label as processing rather than claiming completion.
+        // The launch command returned successfully; project the terminal
+        // completed state so the GitHub issue does not remain stuck in processing.
         if let Err(e) = crate::infra::execution_labels::project_issue_state(
             &repo,
             number,
             &prefix,
-            Some(crate::infra::execution_labels::ExecutionState::Processing),
+            Some(crate::infra::execution_labels::ExecutionState::Completed),
         ) {
             tracing::warn!(issue = %key, error = %e, "failed to project execution label");
         }
