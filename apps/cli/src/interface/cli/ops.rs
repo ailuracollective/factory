@@ -60,6 +60,7 @@ pub fn test(repo: &str, issue: u64, prompt: Option<String>) -> Result<()> {
         existing_thread: existing.as_deref(),
         attempt,
         execution_id: exec_id,
+        profile: None,
     });
     match launch {
         Ok(tid) => {
@@ -136,6 +137,7 @@ pub fn run_prompt(repo: &str, prompt: &str) -> Result<()> {
         existing_thread: None,
         attempt: 1,
         execution_id: exec_id,
+        profile: None,
     });
     match launch {
         Ok(tid) => {
@@ -511,8 +513,7 @@ pub fn agent_run(
     repo: &str,
     issue: Option<u64>,
     prompt: Option<&str>,
-    harness: Option<&str>,
-    model: Option<&str>,
+    profile: Option<&str>,
     json: bool,
 ) -> Result<()> {
     // exactly one source
@@ -552,18 +553,6 @@ pub fn agent_run(
             println!("Project path not found: {}", project.display());
         }
         return Err(anyhow::anyhow!("project path not found"));
-    }
-
-    // apply overrides via env (no config mutation)
-    if let Some(h) = harness {
-        unsafe {
-            std::env::set_var("ISSUE_FACTORY_HARNESS", h);
-        }
-    }
-    if let Some(m) = model {
-        unsafe {
-            std::env::set_var("ISSUE_FACTORY_MODEL", m);
-        }
     }
 
     if let Some(issue_num) = issue {
@@ -617,6 +606,7 @@ pub fn agent_run(
             existing_thread: existing.as_deref(),
             attempt,
             execution_id: Some(&exec_id),
+            profile,
         });
         match launch {
             Ok(tid) => {
@@ -691,6 +681,7 @@ pub fn agent_run(
             existing_thread: None,
             attempt: 1,
             execution_id: Some(&exec_id),
+            profile,
         });
         match launch {
             Ok(tid) => {
@@ -727,27 +718,8 @@ pub fn agent_run(
     }
 }
 
-pub fn agent_check(
-    repo: Option<&str>,
-    harness_override: Option<&str>,
-    model_override: Option<&str>,
-    json: bool,
-) -> Result<()> {
+pub fn agent_check(repo: Option<&str>, profile: Option<&str>, json: bool) -> Result<()> {
     let config = load_config()?;
-    let defaults = &config.defaults;
-
-    // resolve harness/model like agent run: env overrides then args
-    let mut harness = match std::env::var("ISSUE_FACTORY_HARNESS") {
-        Ok(v) => v,
-        Err(_) => crate::t3::resolve_harness(&defaults.harness),
-    };
-    if let Some(h) = harness_override {
-        harness = crate::t3::resolve_harness(h);
-    }
-    let mut model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
-    if let Some(m) = model_override {
-        model = m.to_string();
-    }
 
     #[derive(serde::Serialize)]
     struct Check {
@@ -758,8 +730,17 @@ pub fn agent_check(
     let mut checks: Vec<Check> = Vec::new();
     let mut required_failed = false;
 
-    // project path / repo registration
-    if let Some(repo_name) = repo {
+    let legacy_env = crate::config::legacy_env_overrides();
+    if !legacy_env.is_empty() {
+        checks.push(Check {
+            id: "legacy_env",
+            status: "fail",
+            message: legacy_env.join("; "),
+        });
+        required_failed = true;
+    }
+
+    let project_path = if let Some(repo_name) = repo {
         match get_repo(&config, repo_name) {
             Some(r) => {
                 let project = std::path::PathBuf::from(&r.path);
@@ -769,6 +750,12 @@ pub fn agent_check(
                         status: "pass",
                         message: format!("project path exists: {}", project.display()),
                     });
+                    checks.push(Check {
+                        id: "repo_registration",
+                        status: "pass",
+                        message: format!("repo registered: {}", r.github),
+                    });
+                    Some(project)
                 } else {
                     checks.push(Check {
                         id: "project_path",
@@ -776,12 +763,8 @@ pub fn agent_check(
                         message: format!("project path not found: {}", project.display()),
                     });
                     required_failed = true;
+                    None
                 }
-                checks.push(Check {
-                    id: "repo_registration",
-                    status: "pass",
-                    message: format!("repo registered: {}", r.github),
-                });
             }
             None => {
                 checks.push(Check {
@@ -790,6 +773,7 @@ pub fn agent_check(
                     message: format!("repo not found: {repo_name}"),
                 });
                 required_failed = true;
+                None
             }
         }
     } else {
@@ -798,57 +782,139 @@ pub fn agent_check(
             status: "warn",
             message: "no --repo provided; skipping repo/project checks".to_string(),
         });
-    }
+        std::env::current_dir()
+            .ok()
+            .filter(|p| p.join("factory.json").exists())
+    };
 
-    // harness availability
-    let installed = crate::t3::harnesses();
-    let h = crate::t3::harness(&harness);
-    if h.is_some() {
-        checks.push(Check {
-            id: "harness_available",
-            status: "pass",
-            message: format!("harness available: {harness}"),
-        });
-    } else if installed.is_empty() {
-        checks.push(Check {
-            id: "harness_available",
-            status: "unknown",
-            message: format!("cannot determine harness availability (T3 cache missing): {harness}"),
-        });
-    } else {
-        checks.push(Check {
-            id: "harness_available",
-            status: "fail",
-            message: format!("harness not installed: {harness}"),
-        });
-        required_failed = true;
-    }
+    let mut resolved_harness: Option<String> = None;
+    let mut resolved_model: Option<String> = None;
+    let mut resolved_profile: Option<String> = None;
 
-    // model discovery
-    match h {
-        Some(hh) => {
-            if hh.models.is_empty() || hh.models.contains(&model) {
+    if let Some(project) = project_path {
+        match crate::config::load_factory_config(&project) {
+            Ok(Some(repo_cfg)) => {
                 checks.push(Check {
-                    id: "model_discovery",
+                    id: "factory_config",
                     status: "pass",
-                    message: format!("model available: {model}"),
+                    message: format!(
+                        "factory.json loaded: {}",
+                        project.join("factory.json").display()
+                    ),
                 });
-            } else {
+                match crate::config::resolve_execution_profile(&repo_cfg, profile) {
+                    Ok(validation) => {
+                        resolved_profile = Some(validation.resolved.profile_name.clone());
+                        resolved_harness = Some(validation.resolved.harness.clone());
+                        resolved_model = Some(validation.resolved.model.clone());
+
+                        for w in &validation.warnings {
+                            checks.push(Check {
+                                id: "profile_warning",
+                                status: "warn",
+                                message: w.clone(),
+                            });
+                        }
+
+                        let discovery_unavailable = validation.is_temporary_discovery_failure();
+                        let mut profile_errors = validation.errors.clone();
+                        if discovery_unavailable {
+                            if let crate::infra::t3::DiscoveryState::Unavailable(msg) =
+                                &validation.discovery
+                            {
+                                checks.push(Check {
+                                    id: "harness_available",
+                                    status: "unknown",
+                                    message: format!(
+                                        "{msg}; cannot verify harness/model for profile `{}`",
+                                        validation.resolved.profile_name
+                                    ),
+                                });
+                                checks.push(Check {
+                                    id: "model_discovery",
+                                    status: "unknown",
+                                    message: format!(
+                                        "cannot verify model (temporary discovery failure): {}",
+                                        validation.resolved.model
+                                    ),
+                                });
+                            }
+                        } else {
+                            let harness_ok = !profile_errors.iter().any(|e| e.contains("harness"));
+                            let model_ok = !profile_errors.iter().any(|e| e.contains("model"));
+                            if harness_ok {
+                                checks.push(Check {
+                                    id: "harness_available",
+                                    status: "pass",
+                                    message: format!(
+                                        "harness available: {} (profile {})",
+                                        validation.resolved.harness,
+                                        validation.resolved.profile_name
+                                    ),
+                                });
+                            }
+                            if model_ok {
+                                checks.push(Check {
+                                    id: "model_discovery",
+                                    status: "pass",
+                                    message: format!(
+                                        "model available: {} (profile {})",
+                                        validation.resolved.model, validation.resolved.profile_name
+                                    ),
+                                });
+                            }
+                            for e in profile_errors.drain(..) {
+                                let id = if e.contains("model") {
+                                    "model_discovery"
+                                } else {
+                                    "harness_available"
+                                };
+                                checks.push(Check {
+                                    id,
+                                    status: "fail",
+                                    message: e,
+                                });
+                                required_failed = true;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        checks.push(Check {
+                            id: "profile_resolution",
+                            status: "fail",
+                            message: e.to_string(),
+                        });
+                        required_failed = true;
+                    }
+                }
+            }
+            Ok(None) => {
                 checks.push(Check {
-                    id: "model_discovery",
+                    id: "factory_config",
                     status: "fail",
-                    message: format!("model not found in harness {harness}: {model}"),
+                    message: format!(
+                        "factory.json not found in {}; profiles are the exclusive source of harness/model selection",
+                        project.display()
+                    ),
+                });
+                required_failed = true;
+            }
+            Err(e) => {
+                checks.push(Check {
+                    id: "factory_config",
+                    status: "fail",
+                    message: e.to_string(),
                 });
                 required_failed = true;
             }
         }
-        None => {
-            checks.push(Check {
-                id: "model_discovery",
-                status: "unknown",
-                message: format!("cannot verify model (harness unavailable): {model}"),
-            });
-        }
+    } else if repo.is_none() {
+        checks.push(Check {
+            id: "factory_config",
+            status: "warn",
+            message: "no --repo and no factory.json in current directory; skipping profile checks"
+                .to_string(),
+        });
     }
 
     let overall = if required_failed { "fail" } else { "pass" };
@@ -857,8 +923,9 @@ pub fn agent_check(
         println!(
             "{}",
             serde_json::json!({
-                "harness": harness,
-                "model": model,
+                "profile": resolved_profile,
+                "harness": resolved_harness,
+                "model": resolved_model,
                 "overall": overall,
                 "checks": checks,
             })

@@ -14,8 +14,8 @@ Environment=ISSUE_FACTORY_PROJECTS_BASE=%h/projects/ailuracollective
 Environment=ISSUE_FACTORY_LABEL=status/ready
 Environment=ISSUE_FACTORY_WEBHOOK_SECRET=YOUR_SECRET_HERE
 Environment=ISSUE_FACTORY_WEBHOOK_PORT=8787
-Environment=ISSUE_FACTORY_HARNESS=pi
-Environment=ISSUE_FACTORY_MODEL=opencode-go/iceman-contributor-free
+# Harness/model selection comes from named profiles in repository factory.json.
+# Legacy ISSUE_FACTORY_HARNESS / ISSUE_FACTORY_MODEL overrides are not supported.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/bin/factory daemon run --mode listener --port 8787
 Restart=on-failure

@@ -59,6 +59,7 @@ pub struct AgentLaunchRequest<'a> {
     pub existing_thread: Option<&'a str>,
     pub attempt: u32,
     pub execution_id: Option<&'a str>,
+    pub profile: Option<&'a str>,
 }
 
 pub fn launch_agent(
@@ -77,6 +78,7 @@ pub fn launch_agent(
         existing_thread,
         attempt,
         execution_id: None,
+        profile: None,
     })
 }
 
@@ -84,11 +86,12 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
     let AgentLaunchRequest {
         issue,
         project,
-        config,
+        config: _config,
         prompt,
         existing_thread,
         attempt,
         execution_id,
+        profile,
     } = req;
 
     let number = issue
@@ -166,14 +169,31 @@ pub fn launch_agent_with_execution(req: AgentLaunchRequest<'_>) -> Result<String
         thread_title
     };
 
-    let defaults = &config.defaults;
-    let harness = match std::env::var("ISSUE_FACTORY_HARNESS") {
-        Ok(v) => v,
-        Err(_) => crate::t3::resolve_harness(&defaults.harness),
-    };
-    let model = std::env::var("ISSUE_FACTORY_MODEL").unwrap_or_else(|_| defaults.model.clone());
-    let base_branch =
-        std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| defaults.base_branch.clone());
+    let legacy_env = crate::config::legacy_env_overrides();
+    if !legacy_env.is_empty() {
+        return Err(legacy_env.join("; "));
+    }
+
+    let repo_cfg = crate::config::load_factory_config(project)
+        .map_err(|e| format!("failed to load factory.json: {e}"))?
+        .ok_or_else(|| {
+            "factory.json with named profiles is required for agent execution; \
+             add `profiles` and `default_profile` to factory.json (see `apps/cli/README.md`)"
+                .to_string()
+        })?;
+    let validation =
+        crate::config::resolve_execution_profile(&repo_cfg, profile).map_err(|e| e.to_string())?;
+    let resolved = validation.into_result().map_err(|e| e.to_string())?;
+    let harness = resolved.harness;
+    let model = resolved.model;
+
+    let repo_defaults = repo_cfg.defaults.as_ref();
+    let base_branch = std::env::var("ISSUE_FACTORY_BASE_BRANCH").unwrap_or_else(|_| {
+        repo_defaults
+            .map(|d| d.base_branch.clone())
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| _config.defaults.base_branch.clone())
+    });
 
     let mut cmd = Command::new(&t3_bin);
     cmd.arg("thread")
@@ -308,6 +328,18 @@ mod tests {
             ),
         )
         .unwrap();
+        let t3_home = dir.join("t3home");
+        std::fs::create_dir_all(t3_home.join("caches")).unwrap();
+        std::fs::write(
+            t3_home.join("caches/opencode.json"),
+            r#"{"instanceId":"opencode","driver":"opencode","displayName":"OpenCode","version":"1.0","installed":true,"status":"ready","models":[{"slug":"default"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("factory.json"),
+            r#"{"profiles":{"default":{"harness":"opencode","model":"default"}},"default_profile":"default","defaults":{"base_branch":"main"}}"#,
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -315,6 +347,7 @@ mod tests {
         }
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap()) };
+        unsafe { std::env::set_var("T3CODE_HOME", t3_home.to_str().unwrap()) };
 
         let config = crate::config::Config::default();
         let issue = serde_json::json!({"number": 7, "title": "t", "url": "u"});
@@ -326,6 +359,7 @@ mod tests {
             existing_thread: None,
             attempt: 1,
             execution_id: None,
+            profile: None,
         });
         assert_eq!(res.unwrap(), "t1");
 
@@ -340,6 +374,7 @@ mod tests {
         );
 
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
+        unsafe { std::env::remove_var("T3CODE_HOME") };
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -348,16 +383,30 @@ mod tests {
         let _lock = crate::state::tests::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let tmp = std::env::temp_dir().join(format!(
-            "factory_agent_cancel_{}.db",
+        let dir = std::env::temp_dir().join(format!(
+            "factory_agent_cancel_dir_{}",
             uuid::Uuid::now_v7().simple()
         ));
-        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = dir.join("factory.db");
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_DB_FILE", tmp.to_str().unwrap()) };
 
-        let script = std::env::temp_dir().join(format!("factory_sleep_{}.sh", std::process::id()));
+        let script = dir.join("t3");
         std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        let t3_home = dir.join("t3home");
+        std::fs::create_dir_all(t3_home.join("caches")).unwrap();
+        std::fs::write(
+            t3_home.join("caches/opencode.json"),
+            r#"{"instanceId":"opencode","driver":"opencode","displayName":"OpenCode","version":"1.0","installed":true,"status":"ready","models":[{"slug":"default"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("factory.json"),
+            r#"{"profiles":{"default":{"harness":"opencode","model":"default"}},"default_profile":"default"}"#,
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -365,10 +414,11 @@ mod tests {
         }
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_T3", script.to_str().unwrap()) };
+        unsafe { std::env::set_var("T3CODE_HOME", t3_home.to_str().unwrap()) };
 
         let config = crate::config::Config::default();
         let issue = serde_json::json!({"number": 1, "title": "t", "url": "u"});
-        let project = std::env::temp_dir();
+        let project = dir.clone();
         let exec = crate::execution::create_execution(
             "org/repo#1",
             "org/repo",
@@ -390,6 +440,7 @@ mod tests {
                 existing_thread: None,
                 attempt: 1,
                 execution_id: Some(&exec_id),
+                profile: None,
             })
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -401,11 +452,9 @@ mod tests {
             .unwrap();
         assert_eq!(rec.status, crate::execution::ExecutionStatus::Cancelled);
 
-        let _ = std::fs::remove_file(&script);
-        let _ = std::fs::remove_file(&tmp);
-        // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("T3CODE_HOME") };
         unsafe { std::env::remove_var("ISSUE_FACTORY_DB_FILE") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

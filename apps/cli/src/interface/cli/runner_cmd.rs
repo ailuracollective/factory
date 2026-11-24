@@ -122,6 +122,7 @@ pub async fn process_job(config: Arc<Config>, job: Value) -> Result<()> {
         existing_thread: existing.as_deref(),
         attempt,
         execution_id: exec_id.as_deref(),
+        profile: None,
     });
 
     stop.store(true, std::sync::atomic::Ordering::Relaxed);

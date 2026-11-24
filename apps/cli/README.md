@@ -38,36 +38,74 @@ Run `factory --help` for the full command list. Common commands:
 
 Configuration and state are stored under:
 
-- `~/.config/ailuracollective/factory/`
+- `~/.config/ailuracollective/factory/` (global config)
+- `factory.json` in the repository root (repo config)
 
-`defaults.harness` is the **agent harness** installed in T3 Code
-(`opencode`, `pi`, `codex`, `claudeAgent`, …). `defaults.model` is a model slug
-that belongs to that harness and is passed unchanged to T3, so it can name any
-model the harness exposes. Both are what the CLI hands to `t3 thread start` for
-the agent.
+### Execution profiles
 
-```bash
-factory config set -g harness pi
-factory config set -g model opencode-go/beam-free
+`factory.json` profiles are the exclusive source of harness and model selection.
+Each named profile selects a T3 harness and a model slug that belongs to that
+harness. There is no implicit fallback and no global/repository harness/model
+default.
+
+```json
+{
+  "profiles": {
+    "default": { "harness": "pi", "model": "opencode-go/beam-free" }
+  },
+  "default_profile": "default",
+  "defaults": {
+    "base_branch": "main",
+    "label": "status/ready",
+    "max_attempts": 3
+  }
+}
 ```
 
-Values come from T3 Code's own catalog (`<T3CODE_HOME>/caches`, default
-`~/.t3/caches`), not from `opencode models`, so no harness or model names are
-hardcoded in the CLI:
+- `profiles.<name>.harness` is the T3 harness instance/driver name (`pi`,
+  `opencode`, `codex`, `claudeAgent`, etc.).
+- `profiles.<name>.model` is a model slug exposed by that harness.
+- `default_profile` selects the profile used when `--profile` is not passed.
+- `factory agent run --repo <repo> --issue <n> --profile <name>` selects a
+  named profile explicitly.
+- `factory agent check --repo <repo> [--profile <name>]` validates the selected
+  profile using the same resolver as execution.
 
-- `factory agent harnesses` lists the harnesses T3 reports as installed, marking the
-  configured one.
-- `factory agent models <harness>` lists the models that harness exposes, e.g.
-  `factory agent models opencode`.
-- An unknown harness prints the harnesses T3 reports as installed.
+Profile validation uses existing T3 discovery (`<T3CODE_HOME>/caches`, default
+`~/.t3/caches`). Temporary discovery failures (unreadable/missing T3 cache) are
+reported as temporary failures; invalid profile references or incompatible
+harness/model pairs are rejected as configuration errors.
 
-`factory config set` validates `harness` against installed harnesses and
-`model` against the configured harness when T3's catalog is available; if it
-is not, values are stored as given.
+Legacy `defaults.harness`/`defaults.model` keys and legacy
+`ISSUE_FACTORY_HARNESS`/`ISSUE_FACTORY_MODEL` environment overrides are not
+supported. Remove them and configure named profiles in `factory.json`.
 
-`ISSUE_FACTORY_HARNESS` and `ISSUE_FACTORY_MODEL` override the configured
-values for a single process (for example the systemd unit in
-`service.example`).
+Non-model defaults (`base_branch`, `label`, `max_attempts`), mentions, and
+labels remain supported.
+
+### T3 catalog
+
+- `factory agent harnesses` lists harnesses T3 reports as installed.
+- `factory agent models <harness>` lists models that harness exposes.
+
+### Supported runtime options
+
+Execution runtime is selected per repository profile, not globally. Each agent
+launch passes the selected profile's `harness` as T3 `--provider` and `model`
+as `--model`, so per-session/runtime selection does not mutate global T3 or
+Gentle Shell settings.
+
+- **Pi**: use a profile with `"harness": "pi"` (or the installed T3 Pi harness
+  instance id) and a model slug exposed by that harness. Verify the model with
+  `factory agent models pi`.
+- **Gentle Shell**: use a profile with the Gentle Shell harness instance id as
+  reported by T3 (`factory agent harnesses`) and a compatible model slug exposed
+  by that harness. Gentle Shell runtime options are configured by the installed
+  Gentle Shell/T3 integration; Factory passes only the selected harness/model
+  per session.
+
+For per-session isolation, run separate agent executions with the desired
+profile; Factory does not change global harness/model defaults.
 
 ## Logs
 

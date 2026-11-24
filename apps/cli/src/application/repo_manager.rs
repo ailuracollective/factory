@@ -264,6 +264,33 @@ pub fn sync_repo_labels(repo_slug: &str) -> anyhow::Result<u32> {
     }
     Ok(count)
 }
+
+pub fn remove_repo(name: &str, delete_webhook: bool) -> anyhow::Result<bool> {
+    let mut config = load_config()?;
+    let Some(repo) = get_repo(&config, name).cloned() else {
+        return Ok(false);
+    };
+    if delete_webhook
+        && let Some(hook_id) = repo.hook_id
+        && !repo.github.is_empty()
+        && !crate::webhook_manager::delete_webhook(&repo.github, hook_id)?
+    {
+        anyhow::bail!(
+            "failed to delete webhook {hook_id} for {}; repo registration is unchanged",
+            repo.github
+        );
+    }
+    config
+        .repos
+        .retain(|r| r.name != repo.name && r.github != repo.github);
+    save_config(&config)?;
+    Ok(true)
+}
+
+pub fn list_repos() -> anyhow::Result<Vec<RepoEntry>> {
+    Ok(load_config()?.repos)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{command_message, github_slug_from_remote};
@@ -294,30 +321,4 @@ mod tests {
         );
         assert_eq!(command_message(b"done\n", b"warning"), "done");
     }
-}
-
-pub fn remove_repo(name: &str, delete_webhook: bool) -> anyhow::Result<bool> {
-    let mut config = load_config()?;
-    let Some(repo) = get_repo(&config, name).cloned() else {
-        return Ok(false);
-    };
-    if delete_webhook
-        && let Some(hook_id) = repo.hook_id
-        && !repo.github.is_empty()
-        && !crate::webhook_manager::delete_webhook(&repo.github, hook_id)?
-    {
-        anyhow::bail!(
-            "failed to delete webhook {hook_id} for {}; repo registration is unchanged",
-            repo.github
-        );
-    }
-    config
-        .repos
-        .retain(|r| r.name != repo.name && r.github != repo.github);
-    save_config(&config)?;
-    Ok(true)
-}
-
-pub fn list_repos() -> anyhow::Result<Vec<RepoEntry>> {
-    Ok(load_config()?.repos)
 }

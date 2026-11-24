@@ -206,6 +206,7 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
             existing_thread: existing_thread_for_launch.as_deref(),
             attempt,
             execution_id: exec_for_launch.as_deref(),
+            profile: None,
         })
     })
     .await;

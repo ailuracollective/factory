@@ -101,9 +101,7 @@ enum AgentAction {
         #[arg(long, group = "source")]
         prompt: Option<String>,
         #[arg(long)]
-        harness: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
+        profile: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -112,9 +110,7 @@ enum AgentAction {
         #[arg(long)]
         repo: Option<String>,
         #[arg(long)]
-        harness: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
+        profile: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -331,23 +327,14 @@ fn main() -> ExitCode {
                 repo,
                 issue,
                 prompt,
-                harness,
-                model,
+                profile,
                 json,
-            } => cli::agent_run(
-                &repo,
-                issue,
-                prompt.as_deref(),
-                harness.as_deref(),
-                model.as_deref(),
-                json,
-            ),
+            } => cli::agent_run(&repo, issue, prompt.as_deref(), profile.as_deref(), json),
             AgentAction::Check {
                 repo,
-                harness,
-                model,
+                profile,
                 json,
-            } => cli::agent_check(repo.as_deref(), harness.as_deref(), model.as_deref(), json),
+            } => cli::agent_check(repo.as_deref(), profile.as_deref(), json),
             AgentAction::Harnesses { json } => cli::harnesses(json),
             AgentAction::Models { harness, json } => cli::models(&harness, json),
         },

@@ -6,12 +6,28 @@
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
+    "profiles": {
+      "type": "object",
+      "description": "Named execution profiles. Each profile selects a harness and model for agent execution.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["harness", "model"],
+        "properties": {
+          "harness": { "type": "string", "minLength": 1 },
+          "model": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "default_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the profile to use when no profile is explicitly selected."
+    },
     "defaults": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "harness": { "type": "string" },
-        "model": { "type": "string" },
         "base_branch": { "type": "string" },
         "label": { "type": "string" },
         "max_attempts": { "type": "integer", "minimum": 1 }

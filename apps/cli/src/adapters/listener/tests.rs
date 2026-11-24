@@ -102,6 +102,22 @@ mod lifecycle_tests {
         p
     }
 
+    fn setup_repo_profiles(tmp: &std::path::Path) {
+        let t3_home = tmp.join("t3home");
+        std::fs::create_dir_all(t3_home.join("caches")).unwrap();
+        std::fs::write(
+            t3_home.join("caches/opencode.json"),
+            r#"{"instanceId":"opencode","driver":"opencode","displayName":"OpenCode","version":"1.0","installed":true,"status":"ready","models":[{"slug":"default"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("factory.json"),
+            r#"{"profiles":{"default":{"harness":"opencode","model":"default"}},"default_profile":"default"}"#,
+        )
+        .unwrap();
+        unsafe { std::env::set_var("T3CODE_HOME", t3_home.to_str().unwrap()) };
+    }
+
     #[tokio::test]
     async fn failed_launch_allows_retry() {
         let _lock = crate::state::tests::TEST_ENV_LOCK
@@ -114,6 +130,7 @@ mod lifecycle_tests {
         let _ = std::fs::remove_file(&state_file);
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
+        setup_repo_profiles(&tmp);
 
         let t3_fail = write_script("t3_fail.sh", "#!/bin/sh\nexit 1\n");
         // FIXME: Audit that the environment access only happens in single-threaded code.
@@ -152,6 +169,7 @@ mod lifecycle_tests {
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
+        unsafe { std::env::remove_var("T3CODE_HOME") };
     }
 
     #[tokio::test]
@@ -166,6 +184,7 @@ mod lifecycle_tests {
         let _ = std::fs::remove_file(&state_file);
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
+        setup_repo_profiles(&tmp);
 
         let t3_ok = write_script(
             "t3_ok2.sh",
@@ -193,6 +212,7 @@ mod lifecycle_tests {
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
+        unsafe { std::env::remove_var("T3CODE_HOME") };
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -207,6 +227,7 @@ mod lifecycle_tests {
         let _ = std::fs::remove_file(&state_file);
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
+        setup_repo_profiles(&tmp);
 
         let t3_slow = write_script(
             "t3_slow.sh",
@@ -246,6 +267,7 @@ mod lifecycle_tests {
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
+        unsafe { std::env::remove_var("T3CODE_HOME") };
     }
 
     #[tokio::test]
@@ -292,6 +314,7 @@ mod lifecycle_tests {
         let _ = std::fs::remove_file(&state_file);
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("ISSUE_FACTORY_STATE_FILE", state_file.to_str().unwrap()) };
+        setup_repo_profiles(&tmp);
 
         let t3_ok = write_script(
             "t3_mention_wh.sh",
@@ -330,5 +353,6 @@ mod lifecycle_tests {
         unsafe { std::env::remove_var("ISSUE_FACTORY_T3") };
         // FIXME: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var("ISSUE_FACTORY_STATE_FILE") };
+        unsafe { std::env::remove_var("T3CODE_HOME") };
     }
 }
