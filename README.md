@@ -37,6 +37,7 @@ cargo build -p gateway --target wasm32-unknown-unknown --release
 ## Documentation
 
 - `docs/` — architecture, audits, migration notes, roadmap, and feature docs (for example mentions flow).
+- [Factory execution label adoption (AI-assisted)](docs/factory-execution-label-adoption.md) — repeatable procedure to adopt, update, verify, and remove the Factory execution label catalog in authorized repositories.
 
 ## License
 

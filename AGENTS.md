@@ -9,6 +9,9 @@ The mandatory organization conventions are in
 Read them before working; they govern issues, pull requests, labels, reviews,
 commits, and workflows.
 
+For AI-assisted adoption of the Factory execution label catalog, see
+[docs/factory-execution-label-adoption.md](docs/factory-execution-label-adoption.md).
+
 ## Project
 
 Ailura Factory is a monorepo for AI-assisted development automation.
