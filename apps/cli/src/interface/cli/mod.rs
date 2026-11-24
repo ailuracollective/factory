@@ -123,42 +123,39 @@ pub fn repo_add(name_or_path: &str, json: bool) -> Result<()> {
         } else {
             create_webhook(&entry.github, &url, &secret)
         };
-        match hook_result {
-            Ok(Some(hook_id)) => {
-                let mut cfg = load_config()?;
-                if let Some(r) = cfg.repos.iter_mut().find(|r| r.github == entry.github) {
-                    r.hook_id = Some(hook_id);
-                }
-                save_config(&cfg)?;
-                if !json {
-                    println!("Webhook created (id={})", hook_id);
-                }
+        let hook_id = match hook_result {
+            Ok(Some(id)) => Some(id),
+            _ => crate::webhook_manager::list_webhooks(&entry.github)
+                .ok()
+                .and_then(|hooks| {
+                    hooks
+                        .into_iter()
+                        .find(|(_, hook_url)| hook_url == &url)
+                        .map(|(id, _)| id)
+                }),
+        };
+        if let Some(hook_id) = hook_id {
+            let mut cfg = load_config()?;
+            if let Some(r) = cfg.repos.iter_mut().find(|r| r.github == entry.github) {
+                r.hook_id = Some(hook_id);
             }
-            Ok(None) => {
-                let message = format!(
-                    "repo saved, but webhook creation failed for {}",
-                    entry.github
+            save_config(&cfg)?;
+            if !json {
+                println!("Webhook ready (id={})", hook_id);
+            }
+        } else {
+            let message = format!(
+                "repo saved, but webhook creation failed for {}",
+                entry.github
+            );
+            if json {
+                use crate::interface::output::{OutputError, to_json};
+                println!(
+                    "{}",
+                    to_json(&OutputError::new("WEBHOOK_CREATE_FAILED", &message)).unwrap()
                 );
-                if json {
-                    use crate::interface::output::{OutputError, to_json};
-                    println!(
-                        "{}",
-                        to_json(&OutputError::new("WEBHOOK_CREATE_FAILED", &message)).unwrap()
-                    );
-                }
-                anyhow::bail!("{message}");
             }
-            Err(e) => {
-                let message = format!("repo saved, but webhook setup failed: {e}");
-                if json {
-                    use crate::interface::output::{OutputError, to_json};
-                    println!(
-                        "{}",
-                        to_json(&OutputError::new("WEBHOOK_CREATE_FAILED", &message)).unwrap()
-                    );
-                }
-                anyhow::bail!("{message}");
-            }
+            anyhow::bail!("{message}");
         }
     }
     let n = match sync_labels(&entry.github) {
