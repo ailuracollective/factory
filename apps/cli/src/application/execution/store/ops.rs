@@ -1,6 +1,7 @@
 use super::*;
 use crate::state;
 use anyhow::{Result, bail};
+use sea_orm::ExprTrait;
 use uuid::Uuid;
 
 pub fn new_execution_id() -> String {
@@ -101,15 +102,22 @@ pub fn list_executions(limit: u64) -> Result<Vec<ExecutionRecord>> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list_executions_filtered(
     repo: Option<&str>,
     status: Option<&str>,
     issue: Option<i64>,
+    source: Option<&str>,
+    since: Option<u64>,
+    until: Option<u64>,
+    cursor: Option<&str>,
     limit: u64,
 ) -> Result<Vec<ExecutionRecord>> {
     let path = db_path();
     let repo = repo.map(|s| s.to_string());
     let status = status.map(|s| s.to_string());
+    let source = source.map(|s| s.to_string());
+    let cursor = cursor.map(|s| s.to_string());
     run_async(async move {
         let db = connect(&path).await?;
         let mut q = ExecutionEntity::find();
@@ -122,10 +130,39 @@ pub fn list_executions_filtered(
         if let Some(i) = issue {
             q = q.filter(ExecutionColumn::IssueNumber.eq(i));
         }
+        match source.as_deref() {
+            Some("manual") => q = q.filter(ExecutionColumn::IssueNumber.eq(0i64)),
+            Some("github") => q = q.filter(ExecutionColumn::IssueNumber.ne(0i64)),
+            _ => {}
+        }
+        if let Some(s) = since {
+            q = q.filter(ExecutionColumn::StartedAt.gte(s as i64));
+        }
+        if let Some(u) = until {
+            q = q.filter(ExecutionColumn::StartedAt.lte(u as i64));
+        }
+        if let Some(c) = &cursor {
+            let parts: Vec<&str> = c.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                anyhow::bail!("invalid cursor: {c}");
+            }
+            let started: i64 = parts[0]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid cursor: {c}"))?;
+            let eid = parts[1];
+            // descending: rows with started_at < cursor_started, or equal started_at and execution_id < cursor_id
+            q = q.filter(
+                ExecutionColumn::StartedAt
+                    .lt(started)
+                    .or(ExecutionColumn::StartedAt
+                        .eq(started)
+                        .and(ExecutionColumn::ExecutionId.lt(eid.to_string()))),
+            );
+        }
         let rows = q
             .order_by_desc(ExecutionColumn::StartedAt)
             .order_by_desc(ExecutionColumn::ExecutionId)
-            .limit(limit)
+            .limit(limit + 1)
             .all(&db)
             .await?;
         Ok(rows.into_iter().map(ExecutionRecord::from_model).collect())

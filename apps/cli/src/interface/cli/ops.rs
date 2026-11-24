@@ -361,10 +361,15 @@ pub(crate) fn encode_path_segment(s: &str) -> String {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn execution_list(
     status: Option<&str>,
     repo: Option<&str>,
     issue: Option<u64>,
+    source: Option<&str>,
+    since: Option<u64>,
+    until: Option<u64>,
+    cursor: Option<&str>,
     limit: u64,
     json: bool,
 ) -> Result<()> {
@@ -388,8 +393,43 @@ pub fn execution_list(
             anyhow::bail!("invalid status: {s}");
         }
     }
-    let recs =
-        crate::execution::list_executions_filtered(repo, status, issue.map(|v| v as i64), limit)?;
+    if let Some(src) = source
+        && src != "manual"
+        && src != "github"
+    {
+        anyhow::bail!("invalid source: {src}");
+    }
+    if let Some((a, b)) = since.zip(until)
+        && a > b
+    {
+        anyhow::bail!("--since must be <= --until");
+    }
+    if let Some(c) = cursor {
+        let parts: Vec<&str> = c.splitn(2, ':').collect();
+        if parts.len() != 2 || parts[0].parse::<u64>().is_err() {
+            anyhow::bail!("invalid cursor: {c}");
+        }
+    }
+    if source == Some("manual") && issue.is_some() {
+        anyhow::bail!("--source manual cannot be combined with --issue");
+    }
+    let mut recs = crate::execution::list_executions_filtered(
+        repo,
+        status,
+        issue.map(|v| v as i64),
+        source,
+        since,
+        until,
+        cursor,
+        limit,
+    )?;
+    let next_cursor = if recs.len() as u64 > limit {
+        let last = &recs[limit as usize - 1];
+        Some(format!("{}:{}", last.started_at, last.execution_id))
+    } else {
+        None
+    };
+    recs.truncate(limit as usize);
     if json {
         use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
         #[derive(serde::Serialize)]
@@ -422,7 +462,7 @@ pub fn execution_list(
         let env = OutputEnvelope::new(data).with_meta(OutputMeta {
             count: Some(count),
             limit: Some(limit as usize),
-            next_cursor: None,
+            next_cursor: next_cursor.clone(),
         });
         println!("{}", to_json(&env).unwrap());
     } else {
