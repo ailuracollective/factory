@@ -36,16 +36,24 @@ pub fn init(force: bool, local: bool) -> Result<()> {
             println!("factory.json already exists. Use --force to overwrite.");
             return Ok(());
         }
+        let mut profiles = std::collections::BTreeMap::new();
+        profiles.insert(
+            "default".to_string(),
+            crate::config::ExecutionProfile {
+                harness: "opencode".to_string(),
+                model: "default".to_string(),
+            },
+        );
         let fc = FactoryRepoConfig {
             defaults: Some(Defaults {
-                harness: String::new(),
-                model: String::new(),
                 base_branch: "main".to_string(),
                 label: "status/ready".to_string(),
                 max_attempts: 3,
             }),
             mentions: Some(MentionsConfig::default()),
             labels: None,
+            profiles: Some(profiles),
+            default_profile: Some("default".to_string()),
         };
         std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
         println!("Created {}", path.display());
@@ -1041,13 +1049,9 @@ pub fn harnesses(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Configured harness resolved to a T3 id, used to flag the default row.
+/// Global harness default was removed; profiles in factory.json select execution harness/model.
 fn cached_default_harness() -> Option<String> {
-    let configured = load_config().ok()?.defaults.harness;
-    if configured.trim().is_empty() {
-        return None;
-    }
-    Some(crate::t3::resolve_harness(&configured))
+    None
 }
 
 pub fn models(harness: &str, json: bool) -> Result<()> {
@@ -1117,6 +1121,9 @@ fn available_harnesses() -> String {
 pub fn config_get(json: bool) -> Result<()> {
     let mut cfg = load_config()?;
     let mut labels_prefix = crate::infra::execution_labels::DEFAULT_PREFIX.to_string();
+    let mut profiles: std::collections::BTreeMap<String, crate::config::ExecutionProfile> =
+        std::collections::BTreeMap::new();
+    let mut default_profile: Option<String> = None;
     // Apply repo-level factory.json if present in cwd or an ancestor.
     if let Some(repo_cfg) = find_factory_config()? {
         if let Some(labels) = repo_cfg.labels
@@ -1125,12 +1132,6 @@ pub fn config_get(json: bool) -> Result<()> {
             labels_prefix = labels.prefix;
         }
         if let Some(d) = repo_cfg.defaults {
-            if !d.harness.is_empty() {
-                cfg.defaults.harness = d.harness;
-            }
-            if !d.model.is_empty() {
-                cfg.defaults.model = d.model;
-            }
             if !d.base_branch.is_empty() {
                 cfg.defaults.base_branch = d.base_branch;
             }
@@ -1164,13 +1165,20 @@ pub fn config_get(json: bool) -> Result<()> {
                 }
             }
         }
+        if let Some(p) = repo_cfg.profiles {
+            profiles = p;
+        }
+        default_profile = repo_cfg.default_profile;
     }
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         #[derive(serde::Serialize)]
-        struct ConfigDto {
+        struct ProfileDto {
             harness: String,
             model: String,
+        }
+        #[derive(serde::Serialize)]
+        struct ConfigDto {
             base_branch: String,
             label: String,
             max_attempts: u32,
@@ -1183,10 +1191,10 @@ pub fn config_get(json: bool) -> Result<()> {
             labels_prefix: String,
             webhook_port: u16,
             webhook_bind: String,
+            default_profile: Option<String>,
+            profiles: std::collections::BTreeMap<String, ProfileDto>,
         }
         let dto = ConfigDto {
-            harness: crate::t3::resolve_harness(&cfg.defaults.harness),
-            model: cfg.defaults.model.clone(),
             base_branch: cfg.defaults.base_branch.clone(),
             label: cfg.defaults.label.clone(),
             max_attempts: cfg.defaults.max_attempts,
@@ -1199,17 +1207,24 @@ pub fn config_get(json: bool) -> Result<()> {
             labels_prefix,
             webhook_port: cfg.webhook.port,
             webhook_bind: cfg.webhook.bind.clone(),
+            default_profile,
+            profiles: profiles
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        ProfileDto {
+                            harness: v.harness,
+                            model: v.model,
+                        },
+                    )
+                })
+                .collect(),
         };
         let env = OutputEnvelope::new(dto);
         println!("{}", to_json(&env).unwrap());
         return Ok(());
     }
-    // Show the harness T3 will actually receive (legacy values resolve).
-    println!(
-        "harness:  {}",
-        crate::t3::resolve_harness(&cfg.defaults.harness)
-    );
-    println!("model:    {}", cfg.defaults.model);
     println!("base_branch: {}", cfg.defaults.base_branch);
     println!("label: {}", cfg.defaults.label);
     println!("max_attempts: {}", cfg.defaults.max_attempts);
@@ -1225,6 +1240,26 @@ pub fn config_get(json: bool) -> Result<()> {
     println!("labels.prefix: {}", labels_prefix);
     println!("webhook.port: {}", cfg.webhook.port);
     println!("webhook.bind: {}", cfg.webhook.bind);
+    match &default_profile {
+        Some(p) => println!("default_profile: {}", p),
+        None => println!("default_profile: (not set)"),
+    }
+    if profiles.is_empty() {
+        println!("profiles: (none)");
+    } else {
+        println!("profiles:");
+        for (name, p) in &profiles {
+            let marker = if default_profile.as_deref() == Some(name.as_str()) {
+                "*"
+            } else {
+                " "
+            };
+            println!(
+                "  {} {}: harness={}, model={}",
+                marker, name, p.harness, p.model
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1259,8 +1294,6 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         };
         if fc.defaults.is_none() {
             fc.defaults = Some(Defaults {
-                harness: String::new(),
-                model: String::new(),
                 base_branch: String::new(),
                 label: String::new(),
                 max_attempts: 0,
@@ -1270,8 +1303,15 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
             fc.mentions = Some(MentionsConfig::default());
         }
         match key {
-            "harness" => fc.defaults.as_mut().unwrap().harness = value.to_string(),
-            "model" => fc.defaults.as_mut().unwrap().model = value.to_string(),
+            "harness" | "model" => {
+                anyhow::bail!(
+                    "legacy key `{key}` is no longer supported in factory.json defaults; \
+                     configure named profiles and `default_profile` instead (see `apps/cli/README.md`)"
+                );
+            }
+            "default_profile" => {
+                fc.default_profile = Some(value.to_string());
+            }
             "base_branch" => fc.defaults.as_mut().unwrap().base_branch = value.to_string(),
             "label" => fc.defaults.as_mut().unwrap().label = value.to_string(),
             "max_attempts" => {
@@ -1339,40 +1379,12 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
     }
     let mut cfg = load_config()?;
     match key {
-        "harness" => {
-            let installed = crate::t3::harnesses();
-            // Validate only when T3 has probed its harnesses; otherwise accept.
-            if !installed.is_empty() {
-                let Some(h) = crate::t3::harness(value) else {
-                    println!(
-                        "Unknown harness: {}. Available: {}",
-                        value,
-                        installed
-                            .iter()
-                            .map(|h| h.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    return Ok(());
-                };
-                cfg.defaults.harness = h.name;
-            } else {
-                cfg.defaults.harness = value.to_string();
-            }
-        }
-        "model" => {
-            let harness = crate::t3::harness(&cfg.defaults.harness);
-            if let Some(h) = &harness
-                && !h.models.is_empty()
-                && !h.models.iter().any(|m| m == value)
-            {
-                println!(
-                    "Unknown model for {}: {}. Use 'factory agent models {}' to list.",
-                    h.name, value, h.name
-                );
-                return Ok(());
-            }
-            cfg.defaults.model = value.to_string();
+        "harness" | "model" => {
+            anyhow::bail!(
+                "legacy global key `{key}` is no longer supported; \
+                 harness/model selection comes from repository `factory.json` profiles. \
+                 Configure named profiles and `default_profile` in factory.json."
+            );
         }
         "base_branch" => cfg.defaults.base_branch = value.to_string(),
         "label" => cfg.defaults.label = value.to_string(),
@@ -1421,19 +1433,14 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         }
         _ => {
             println!(
-                "Unknown key: {}. Use 'harness', 'model', 'base_branch', 'label', 'max_attempts', 'mentions.*'.",
+                "Unknown key: {}. Use 'base_branch', 'label', 'max_attempts', 'mentions.*' (global) or 'default_profile', 'base_branch', 'label', 'max_attempts', 'mentions.*', 'labels.prefix' (local).",
                 key
             );
             return Ok(());
         }
     }
     save_config(&cfg)?;
-    let stored = if key == "harness" {
-        cfg.defaults.harness.as_str()
-    } else {
-        value
-    };
-    println!("Set {} = {}", key, stored);
+    println!("Set {} = {}", key, value);
     Ok(())
 }
 
@@ -1448,24 +1455,77 @@ struct DaemonReloadReport {
 
 pub fn daemon_reload(config_path: Option<&str>, json: bool) -> anyhow::Result<()> {
     use crate::config;
-    let _current = config::load_config()?;
+    let current = config::load_config().ok();
     let candidate_path = config_path
         .map(std::path::PathBuf::from)
         .unwrap_or_else(config::config_file);
     let data = std::fs::read_to_string(&candidate_path)?;
-    let _candidate: config::Config = serde_json::from_str(&data)?;
+    let raw: serde_json::Value = serde_json::from_str(&data)?;
+    let mut rejected: Vec<String> = Vec::new();
+
+    let legacy = config::detect_legacy_global_keys(&raw);
+    for d in legacy {
+        rejected.push(d);
+    }
+
+    let candidate: Result<config::Config, _> = serde_json::from_str(&data);
+    let mut candidate_cfg = None;
+    match candidate {
+        Ok(cfg) => candidate_cfg = Some(cfg),
+        Err(e) => rejected.push(format!("invalid config: {e}")),
+    }
+
+    if let Some(cfg) = &candidate_cfg {
+        for repo in &cfg.repos {
+            let project = std::path::PathBuf::from(&repo.path);
+            match config::load_factory_config(&project) {
+                Ok(Some(repo_cfg)) => {
+                    if let Err(e) = config::validate_factory_repo_config(&repo_cfg) {
+                        rejected.push(format!("repo {}: {e}", repo.github));
+                    }
+                }
+                Ok(None) => {
+                    // No factory.json: execution will require it; not a reload blocker.
+                }
+                Err(e) => rejected.push(format!("repo {}: {e}", repo.github)),
+            }
+        }
+    }
+
+    let status = if rejected.is_empty() {
+        "not_running"
+    } else {
+        "rejected"
+    };
     let report = DaemonReloadReport {
         generation: 1,
-        applied: vec![],
-        rejected: vec![],
+        applied: if rejected.is_empty() && candidate_cfg.is_some() {
+            vec!["global_config".to_string()]
+        } else {
+            vec![]
+        },
+        rejected: rejected.clone(),
         restart_required: false,
-        status: "not_running",
+        status,
     };
     if json {
         let env = crate::interface::output::OutputEnvelope::new(report);
         println!("{}", crate::interface::output::to_json(&env).unwrap());
-    } else {
+    } else if rejected.is_empty() {
         println!("daemon reload: no running daemon (status=not_running)");
+        if current.is_some() {
+            println!(
+                "candidate config validated; active configuration preserved (no running daemon)"
+            );
+        }
+    } else {
+        println!("daemon reload: rejected; active configuration preserved");
+        for r in &rejected {
+            println!("  - {r}");
+        }
+    }
+    if !rejected.is_empty() {
+        anyhow::bail!("daemon reload rejected");
     }
     Ok(())
 }

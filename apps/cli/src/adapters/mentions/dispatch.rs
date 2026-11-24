@@ -102,6 +102,7 @@ impl Dispatcher for AgentDispatcher {
             existing_thread: existing_thread.as_deref(),
             attempt,
             execution_id: exec_id,
+            profile: None,
         });
         match launch {
             Ok(thread) => {

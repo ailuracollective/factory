@@ -38,4 +38,4 @@
 ## Compatibility
 
 - Keep local listener and commands.
-- Config keys are additive with defaults, except the agent selection key: it is now `defaults.harness` (harness installed in T3 Code). Files written before that rename need `factory config set -g harness <harness>` once per machine.
+- Execution harness/model selection is configured through named `profiles` in repository `factory.json` (`default_profile` + `profiles.<name>.{harness,model}`). Legacy global/repo `defaults.harness`/`defaults.model` keys and `ISSUE_FACTORY_HARNESS`/`ISSUE_FACTORY_MODEL` overrides are not supported; migrate configs to profiles. Non-model defaults remain additive.

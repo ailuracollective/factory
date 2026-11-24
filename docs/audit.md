@@ -20,7 +20,7 @@ Single Rust crate `factory` (edition 2021) with modules:
 
 ## Config & state
 
-JSON on disk under `~/.config/ailuracollective/factory/`. Env overrides: `ISSUE_FACTORY_*`. Agent defaults are `defaults.harness` (harness installed in T3 Code) and `defaults.model` (slug of that harness). State persists issues map with status (pending/running/failed/completed), attempts, thread_id, last_error.
+JSON on disk under `~/.config/ailuracollective/factory/` (global config) and `factory.json` in repositories (repo config). Env overrides: `ISSUE_FACTORY_*` (non-execution; legacy harness/model overrides are not supported). Execution harness/model selection comes exclusively from named `factory.json` profiles. State persists issues map with status (pending/running/failed/completed), attempts, thread_id, last_error.
 
 ## T3 integration
 

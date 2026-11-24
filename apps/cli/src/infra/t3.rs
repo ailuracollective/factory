@@ -30,17 +30,37 @@ fn t3_home() -> PathBuf {
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".t3"))
 }
 
-pub fn harnesses() -> Vec<Harness> {
+#[derive(Debug, Clone)]
+pub enum DiscoveryState {
+    Available(Vec<Harness>),
+    /// T3 cache is missing or unreadable - temporary discovery failure.
+    Unavailable(String),
+}
+
+pub fn discover_harnesses() -> DiscoveryState {
     let dir = t3_home().join("caches");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) => {
+            return DiscoveryState::Unavailable(format!(
+                "temporary discovery failure: cannot read T3 cache at {}: {e}",
+                dir.display()
+            ));
+        }
     };
     let mut found: Vec<Harness> = entries
         .filter_map(|e| std::fs::read_to_string(e.ok()?.path()).ok())
         .filter_map(|data| parse_cache(&data))
         .collect();
     found.sort_by(|a, b| a.name.cmp(&b.name));
-    found
+    DiscoveryState::Available(found)
+}
+
+pub fn harnesses() -> Vec<Harness> {
+    match discover_harnesses() {
+        DiscoveryState::Available(v) => v,
+        DiscoveryState::Unavailable(_) => Vec::new(),
+    }
 }
 
 pub fn harness(name: &str) -> Option<Harness> {
