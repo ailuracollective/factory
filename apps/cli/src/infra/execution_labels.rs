@@ -259,6 +259,61 @@ pub fn detect_config_inconsistency(
     )
 }
 
+/// Best-effort projection of an execution state onto a GitHub issue.
+/// Labels are observational projections, not commands: failures are returned to
+/// the caller for logging and must not be treated as execution authorization.
+pub fn project_issue_state(
+    repo: &str,
+    number: i64,
+    prefix: &str,
+    desired: Option<ExecutionState>,
+) -> Result<()> {
+    let catalog = resolve_catalog(prefix)?;
+    let mut args: Vec<String> = vec![
+        "issue".to_string(),
+        "edit".to_string(),
+        number.to_string(),
+        "--repo".to_string(),
+        repo.to_string(),
+    ];
+
+    let desired_name = desired.map(|s| catalog.label_for(s).name.clone());
+    for label in &catalog.labels {
+        if Some(&label.name) == desired_name.as_ref() {
+            args.push("--add-label".to_string());
+            args.push(label.name.clone());
+        } else {
+            args.push("--remove-label".to_string());
+            args.push(label.name.clone());
+        }
+    }
+
+    let output = std::process::Command::new("gh").args(&args).output();
+    match output {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            bail!("gh issue edit failed for {repo}#{number}: {detail}");
+        }
+        Err(e) => bail!("failed to run gh issue edit for {repo}#{number}: {e}"),
+    }
+}
+
+/// Resolve the execution label prefix for a local project path. Falls back to
+/// the default prefix when factory.json is missing or invalid.
+pub fn prefix_for_project(project: &std::path::Path) -> String {
+    match crate::config::load_factory_config(project) {
+        Ok(Some(cfg)) => crate::config::configured_execution_prefix(&cfg).to_string(),
+        _ => DEFAULT_PREFIX.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

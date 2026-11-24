@@ -14,6 +14,7 @@ install: build
 	cp $(ROOT)/target/release/factory ~/.cargo/bin/factory 2>/dev/null || true
 	cp $(ROOT)/target/release/afc ~/.cargo/bin/afc 2>/dev/null || true
 	chmod +x ~/.local/bin/factory ~/.local/bin/afc ~/.cargo/bin/factory ~/.cargo/bin/afc 2>/dev/null || true
+	-~/.local/bin/factory start 2>/dev/null || true
 
 test:
 	cd $(ROOT) && cargo test -p cli

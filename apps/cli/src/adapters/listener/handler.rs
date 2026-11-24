@@ -181,6 +181,17 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
         }
     };
     let exec_id = Some(exec.execution_id.clone());
+
+    let prefix = crate::infra::execution_labels::prefix_for_project(&project);
+    if let Err(e) = crate::infra::execution_labels::project_issue_state(
+        &repo,
+        number,
+        &prefix,
+        Some(crate::infra::execution_labels::ExecutionState::Processing),
+    ) {
+        tracing::warn!(issue = %key, error = %e, "failed to project execution label");
+    }
+
     let issue_for_launch = issue.clone();
     let project_for_launch = project.clone();
     let config_for_launch = state.config.clone();
@@ -229,12 +240,29 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
     }
 
     if let Some(err) = failure_message {
+        let cancelled = exec_id
+            .as_ref()
+            .map(|id| crate::execution::is_cancel_requested(id))
+            .unwrap_or(false);
         if let Some(ref id) = exec_id {
-            if crate::execution::is_cancel_requested(id) {
+            if cancelled {
                 let _ = crate::execution::mark_cancel_confirmed(id, "cancelled");
             } else {
                 let _ = crate::execution::fail_execution(id, &err);
             }
+        }
+        let terminal = if cancelled {
+            crate::infra::execution_labels::ExecutionState::Cancelled
+        } else {
+            crate::infra::execution_labels::ExecutionState::Failed
+        };
+        if let Err(e) = crate::infra::execution_labels::project_issue_state(
+            &repo,
+            number,
+            &prefix,
+            Some(terminal),
+        ) {
+            tracing::warn!(issue = %key, error = %e, "failed to project execution label");
         }
         let assignees = issue_assignee_logins(&issue);
         report_launch_failure(&repo, number, &err, &assignees);
@@ -243,6 +271,16 @@ pub(super) async fn handle_payload(state: AppState, event: String, payload: Valu
         if let Some(ref id) = exec_id {
             let _ =
                 crate::execution::complete_execution(id, thread_id.as_deref(), pr_url.as_deref());
+        }
+        // Launch succeeded; the agent may still be running. Keep the
+        // observational label as processing rather than claiming completion.
+        if let Err(e) = crate::infra::execution_labels::project_issue_state(
+            &repo,
+            number,
+            &prefix,
+            Some(crate::infra::execution_labels::ExecutionState::Processing),
+        ) {
+            tracing::warn!(issue = %key, error = %e, "failed to project execution label");
         }
         format!("launched {}", key)
     }
