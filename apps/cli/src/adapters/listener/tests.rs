@@ -36,6 +36,40 @@ fn issue_matches_label_opened() {
     assert!(!issue_matches_label("other", &issue, "opened", &payload));
 }
 
+#[test]
+fn webhook_log_context_includes_repo_and_issue_number() {
+    let payload = json!({
+        "repository": {"full_name": "ailuracollective/standards"},
+        "issue": {"number": 38}
+    });
+    assert_eq!(
+        webhook_log_context(&payload),
+        "repo=ailuracollective/standards number=38 "
+    );
+}
+
+#[test]
+fn webhook_log_context_includes_pull_request_number() {
+    let payload = json!({
+        "repository": {"full_name": "org/repo"},
+        "pull_request": {"number": 7}
+    });
+    assert_eq!(webhook_log_context(&payload), "repo=org/repo number=7 ");
+}
+
+#[test]
+fn webhook_log_context_handles_missing_context() {
+    assert_eq!(webhook_log_context(&json!({})), "");
+    assert_eq!(
+        webhook_log_context(&json!({"repository": {"full_name": "org/repo"}})),
+        "repo=org/repo "
+    );
+    assert_eq!(
+        webhook_log_context(&json!({"issue": {"number": 3}})),
+        "number=3 "
+    );
+}
+
 #[allow(clippy::await_holding_lock)]
 mod lifecycle_tests {
     use super::*;
