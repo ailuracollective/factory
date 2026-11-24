@@ -169,6 +169,13 @@ enum ExecutionAction {
         #[arg(long)]
         json: bool,
     },
+    /// Show details of one execution
+    Show {
+        /// Execution ID
+        execution_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -396,6 +403,9 @@ fn main() -> ExitCode {
                 force,
                 json,
             ),
+            ExecutionAction::Show { execution_id, json } => {
+                cli::execution_show(&execution_id, json)
+            }
         },
     };
     match result {

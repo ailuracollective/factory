@@ -857,3 +857,108 @@ pub fn agent_check(
     }
     Ok(())
 }
+
+pub fn execution_show(execution_id: &str, json: bool) -> Result<()> {
+    let rec = match crate::execution::get_execution(execution_id)? {
+        Some(r) => r,
+        None => anyhow::bail!("execution not found: {execution_id}"),
+    };
+    if json {
+        use crate::interface::output::{OutputEnvelope, to_json};
+        #[derive(serde::Serialize)]
+        struct ExecutionShow {
+            execution_id: String,
+            issue_key: String,
+            source: String,
+            status: String,
+            repo: String,
+            issue: i64,
+            attempt: u32,
+            requester: Option<String>,
+            runner: Option<String>,
+            thread_id: Option<String>,
+            pr_url: Option<String>,
+            reason: Option<String>,
+            cancel_requested: bool,
+            cancel_requested_by: Option<String>,
+            cancel_requested_at: Option<u64>,
+            cancel_reason: Option<String>,
+            cancel_confirmed_at: Option<u64>,
+            cancel_outcome: Option<String>,
+            started_at: u64,
+            ended_at: Option<u64>,
+            updated_at: u64,
+        }
+        let source = if rec.issue_number == 0 {
+            "manual".to_string()
+        } else {
+            "github".to_string()
+        };
+        let data = ExecutionShow {
+            execution_id: rec.execution_id.clone(),
+            issue_key: rec.issue_key.clone(),
+            source,
+            status: rec.status.as_str().to_string(),
+            repo: rec.repo.clone(),
+            issue: rec.issue_number,
+            attempt: rec.attempt,
+            requester: rec.requester.clone(),
+            runner: rec.runner.clone(),
+            thread_id: rec.thread_id.clone(),
+            pr_url: rec.pr_url.clone(),
+            reason: rec.reason.clone(),
+            cancel_requested: rec.cancel_requested,
+            cancel_requested_by: rec.cancel_requested_by.clone(),
+            cancel_requested_at: rec.cancel_requested_at,
+            cancel_reason: rec.cancel_reason.clone(),
+            cancel_confirmed_at: rec.cancel_confirmed_at,
+            cancel_outcome: rec.cancel_outcome.clone(),
+            started_at: rec.started_at,
+            ended_at: rec.ended_at,
+            updated_at: rec.updated_at,
+        };
+        let env = OutputEnvelope::new(data);
+        println!("{}", to_json(&env).unwrap());
+    } else {
+        println!("Execution: {}", rec.execution_id);
+        println!(
+            "Source: {}",
+            if rec.issue_number == 0 {
+                "manual"
+            } else {
+                "github"
+            }
+        );
+        println!("State: {}", rec.status.as_str());
+        println!("Repository: {}", rec.repo);
+        println!("Issue: {}", rec.issue_number);
+        println!("Attempt: {}", rec.attempt);
+        println!("Started: {}", rec.started_at);
+        println!("Updated: {}", rec.updated_at);
+        if let Some(ended) = rec.ended_at {
+            println!("Ended: {}", ended);
+        }
+        if let Some(v) = &rec.requester {
+            println!("Requester: {}", v);
+        }
+        if let Some(v) = &rec.runner {
+            println!("Runner: {}", v);
+        }
+        if let Some(v) = &rec.thread_id {
+            println!("Thread: {}", v);
+        }
+        if let Some(v) = &rec.pr_url {
+            println!("PR: {}", v);
+        }
+        if let Some(v) = &rec.reason {
+            println!("Reason: {}", v);
+        }
+        if let Some(v) = &rec.cancel_reason {
+            println!("Cancel reason: {}", v);
+        }
+        if let Some(v) = &rec.cancel_outcome {
+            println!("Cancel outcome: {}", v);
+        }
+    }
+    Ok(())
+}
