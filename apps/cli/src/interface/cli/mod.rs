@@ -2,7 +2,9 @@ use crate::config::{
     Defaults, FactoryRepoConfig, LabelsConfig, MentionsConfig, get_repo, load_config,
     load_factory_config, save_config, validate_factory_repo_config,
 };
-use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
+use crate::repo_manager::{
+    add_repo, list_repos, register_t3, remove_repo, sync_labels, sync_repo_labels,
+};
 use crate::webhook_manager::create_webhook;
 use anyhow::Result;
 use std::process::Command;
@@ -81,40 +83,96 @@ fn generate_secret() -> String {
 
 pub fn repo_add(name_or_path: &str, json: bool) -> Result<()> {
     let entry = match add_repo(name_or_path) {
-        Some(e) => e,
-        None => {
+        Ok(e) => e,
+        Err(e) => {
             if json {
                 use crate::interface::output::{OutputError, to_json};
                 println!(
                     "{}",
-                    to_json(&OutputError::new(
-                        "REPO_ADD_FAILED",
-                        format!("Failed to add repo: {}", name_or_path)
-                    ))
-                    .unwrap()
+                    to_json(&OutputError::new("REPO_ADD_FAILED", e.to_string())).unwrap()
                 );
             } else {
-                println!("Failed to add repo: {}", name_or_path);
+                println!("Failed to add repo: {e}");
             }
-            anyhow::bail!("failed to add repo: {}", name_or_path);
+            return Err(e);
         }
     };
+    if !register_t3(std::path::Path::new(&entry.path)) {
+        let message = format!(
+            "repo saved, but failed to register it with T3: {}",
+            entry.path
+        );
+        if json {
+            use crate::interface::output::{OutputError, to_json};
+            println!(
+                "{}",
+                to_json(&OutputError::new("T3_REGISTRATION_FAILED", &message)).unwrap()
+            );
+        }
+        anyhow::bail!("{message}");
+    }
     let config = load_config()?;
     let url = config.webhook.funnel_url.clone();
     let secret = config.webhook.secret.clone();
-    if !url.is_empty()
-        && !secret.is_empty()
-        && let Some(hook_id) = create_webhook(&entry.github, &url, &secret)?
-    {
-        // update config with hook_id
-        let mut cfg = load_config()?;
-        if let Some(r) = cfg.repos.iter_mut().find(|r| r.name == entry.name) {
-            r.hook_id = Some(hook_id);
+    if !url.is_empty() && !secret.is_empty() {
+        let existing = config.repos.iter().find(|r| r.github == entry.github);
+        let hook_result = if let Some(hook_id) = existing.and_then(|r| r.hook_id) {
+            crate::webhook_manager::update_webhook(&entry.github, hook_id, &url, &secret)
+                .map(|updated| updated.then_some(hook_id))
+        } else {
+            create_webhook(&entry.github, &url, &secret)
+        };
+        match hook_result {
+            Ok(Some(hook_id)) => {
+                let mut cfg = load_config()?;
+                if let Some(r) = cfg.repos.iter_mut().find(|r| r.github == entry.github) {
+                    r.hook_id = Some(hook_id);
+                }
+                save_config(&cfg)?;
+                if !json {
+                    println!("Webhook created (id={})", hook_id);
+                }
+            }
+            Ok(None) => {
+                let message = format!(
+                    "repo saved, but webhook creation failed for {}",
+                    entry.github
+                );
+                if json {
+                    use crate::interface::output::{OutputError, to_json};
+                    println!(
+                        "{}",
+                        to_json(&OutputError::new("WEBHOOK_CREATE_FAILED", &message)).unwrap()
+                    );
+                }
+                anyhow::bail!("{message}");
+            }
+            Err(e) => {
+                let message = format!("repo saved, but webhook setup failed: {e}");
+                if json {
+                    use crate::interface::output::{OutputError, to_json};
+                    println!(
+                        "{}",
+                        to_json(&OutputError::new("WEBHOOK_CREATE_FAILED", &message)).unwrap()
+                    );
+                }
+                anyhow::bail!("{message}");
+            }
         }
-        save_config(&cfg)?;
-        println!("Webhook created (id={})", hook_id);
     }
-    let n = sync_labels(&entry.github);
+    let n = match sync_labels(&entry.github) {
+        Ok(n) => n,
+        Err(e) => {
+            if json {
+                use crate::interface::output::{OutputError, to_json};
+                println!(
+                    "{}",
+                    to_json(&OutputError::new("LABEL_SYNC_FAILED", e.to_string())).unwrap()
+                );
+            }
+            return Err(e);
+        }
+    };
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         #[derive(serde::Serialize)]
@@ -143,7 +201,7 @@ pub fn repo_add(name_or_path: &str, json: bool) -> Result<()> {
 
 pub fn repo_list(json: bool) -> Result<()> {
     use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
-    let repos = list_repos();
+    let repos = list_repos()?;
     if json {
         #[derive(serde::Serialize)]
         struct RepoDto {
@@ -180,7 +238,7 @@ pub fn repo_list(json: bool) -> Result<()> {
 }
 
 pub fn repo_remove(name: &str, json: bool) -> Result<()> {
-    if remove_repo(name) {
+    if remove_repo(name, false)? {
         if json {
             use crate::interface::output::{OutputEnvelope, to_json};
             #[derive(serde::Serialize)]
@@ -239,7 +297,19 @@ pub fn repo_sync(name: &str, json: bool) -> Result<()> {
             anyhow::bail!("repo not found: {}", name);
         }
     };
-    let n = sync_labels(&repo.github);
+    let n = match sync_repo_labels(&repo.github) {
+        Ok(n) => n,
+        Err(e) => {
+            if json {
+                use crate::interface::output::{OutputError, to_json};
+                println!(
+                    "{}",
+                    to_json(&OutputError::new("LABEL_SYNC_FAILED", e.to_string())).unwrap()
+                );
+            }
+            return Err(e);
+        }
+    };
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         #[derive(serde::Serialize)]
@@ -281,7 +351,10 @@ pub(super) fn repo_check_results(
     } else {
         results.push(("OK", format!("github: {}", repo.github)));
         let (code, remote) = run(&["git", "-C", &repo.path, "remote", "get-url", "origin"]);
-        if code == 0 && remote.contains(&repo.github) {
+        let matches = code == 0
+            && crate::repo_manager::github_slug_from_remote(&remote)
+                .is_ok_and(|slug| slug.eq_ignore_ascii_case(&repo.github));
+        if matches {
             results.push(("OK", "git remote matches github".to_string()));
         } else if code == 0 {
             results.push((
@@ -316,13 +389,37 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
         Some(n) => match get_repo(&config, n) {
             Some(r) => vec![r.clone()],
             None => {
-                println!("Repo not found: {n}");
+                if json {
+                    use crate::interface::output::{OutputError, to_json};
+                    println!(
+                        "{}",
+                        to_json(&OutputError::new(
+                            "REPO_NOT_FOUND",
+                            format!("Repo not found: {n}")
+                        ))
+                        .unwrap()
+                    );
+                } else {
+                    println!("Repo not found: {n}");
+                }
                 anyhow::bail!("repo not found: {n}");
             }
         },
         None => {
             if config.repos.is_empty() {
-                println!("No repos configured. Use 'factory repo add <repo>'.");
+                if json {
+                    use crate::interface::output::{OutputEnvelope, OutputMeta, to_json};
+                    let env = OutputEnvelope::new(Vec::<serde_json::Value>::new()).with_meta(
+                        OutputMeta {
+                            count: Some(0),
+                            limit: None,
+                            next_cursor: None,
+                        },
+                    );
+                    println!("{}", to_json(&env).unwrap());
+                } else {
+                    println!("No repos configured. Use 'factory repo add <repo>'.");
+                }
                 return Ok(());
             }
             config.repos.clone()
@@ -331,8 +428,6 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
 
     let webhook_expected =
         !config.webhook.funnel_url.is_empty() && !config.webhook.secret.is_empty();
-    let mut failed = 0usize;
-
     #[derive(serde::Serialize)]
     struct Check {
         id: String,
@@ -355,7 +450,23 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
         }
         let mut repo_ok = true;
         let mut checks: Vec<Check> = Vec::new();
-        for (level, msg) in repo_check_results(repo, webhook_expected) {
+        let mut checks_for_repo = repo_check_results(repo, webhook_expected);
+        if webhook_expected && repo.hook_id.is_none() && !repo.github.is_empty() {
+            match crate::webhook_manager::list_webhooks(&repo.github) {
+                Ok(hooks)
+                    if hooks
+                        .iter()
+                        .any(|(_, url)| url == &config.webhook.funnel_url) =>
+                {
+                    checks_for_repo
+                        .retain(|(_, message)| !message.contains("webhook hook_id missing"));
+                    checks_for_repo.push(("OK", "webhook found remotely".to_string()));
+                }
+                Ok(_) => {}
+                Err(e) => checks_for_repo.push(("FAIL", format!("webhook check failed: {e}"))),
+            }
+        }
+        for (level, msg) in checks_for_repo {
             if !json {
                 println!("  [{level}] {msg}");
             }
@@ -369,9 +480,6 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
                 message: msg.clone(),
             });
         }
-        if !repo_ok {
-            failed += 1;
-        }
         repo_results.push(RepoResult {
             name: repo.name.clone(),
             github: repo.github.clone(),
@@ -380,6 +488,7 @@ pub fn repo_check(name: Option<&str>, json: bool) -> Result<()> {
         });
     }
 
+    let failed = repo_results.iter().filter(|repo| !repo.ok).count();
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         let env = OutputEnvelope::new(repo_results);

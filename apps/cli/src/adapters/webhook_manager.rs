@@ -99,3 +99,22 @@ pub fn delete_webhook(repo_slug: &str, hook_id: u64) -> Result<bool> {
     ]);
     Ok(code == 0)
 }
+
+pub fn list_webhooks(repo_slug: &str) -> Result<Vec<(u64, String)>> {
+    let path = format!("repos/{repo_slug}/hooks");
+    let (code, output) = run(&["gh".to_string(), "api".to_string(), path]);
+    anyhow::ensure!(
+        code == 0,
+        "failed to list webhooks for {repo_slug}: {output}"
+    );
+    let hooks: Vec<serde_json::Value> = serde_json::from_str(&output)?;
+    Ok(hooks
+        .into_iter()
+        .filter_map(|hook| {
+            Some((
+                hook.get("id")?.as_u64()?,
+                hook.get("config")?.get("url")?.as_str()?.to_string(),
+            ))
+        })
+        .collect())
+}
