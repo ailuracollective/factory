@@ -141,6 +141,14 @@ enum ExecutionAction {
         repo: Option<String>,
         #[arg(long)]
         issue: Option<u64>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        since: Option<u64>,
+        #[arg(long)]
+        until: Option<u64>,
+        #[arg(long)]
+        cursor: Option<String>,
         #[arg(long, default_value = "20")]
         limit: u64,
         #[arg(long)]
@@ -356,9 +364,23 @@ fn main() -> ExitCode {
                 status,
                 repo,
                 issue,
+                source,
+                since,
+                until,
+                cursor,
                 limit,
                 json,
-            } => cli::execution_list(status.as_deref(), repo.as_deref(), issue, limit, json),
+            } => cli::execution_list(
+                status.as_deref(),
+                repo.as_deref(),
+                issue,
+                source.as_deref(),
+                since,
+                until,
+                cursor.as_deref(),
+                limit,
+                json,
+            ),
             ExecutionAction::Cancel {
                 execution_id,
                 repo,
