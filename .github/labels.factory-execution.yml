@@ -1,0 +1,49 @@
+# Factory execution label catalog — canonical, distributable manifest.
+#
+# Version: 1.0.0
+# Catalog: factory-execution-labels
+# Scope: GitHub issue labels representing observed Factory automation state.
+#
+# This manifest is independent of the organization-wide label taxonomy and is
+# compatible with level-1 extensions in `.github/standards.local.yml`.
+# External repositories may copy this file and apply the labels it declares.
+#
+# Apply labels from the repository root after reviewing remote differences:
+#
+#   yq -r '.[] | "gh label create \"\(.name)\" --color \"\(.color)\" --description \"\(.description)\" --force"' \
+#     .github/labels.factory-execution.yml | sh
+#
+# Quote every color. Labels are observational projections, not commands or
+# authoritative execution state. See docs/factory-execution-label-standard.md.
+
+- name: "ai/queued"
+  color: "CFD3D7"
+  description: "Accepted work awaiting execution, including scheduled retries."
+
+- name: "ai/processing"
+  color: "1D76DB"
+  description: "Active execution."
+
+- name: "ai/waiting"
+  color: "FBCA04"
+  description: "Waiting for an external condition without human intervention."
+
+- name: "ai/blocked"
+  color: "B60205"
+  description: "An unmet prerequisite prevents progress."
+
+- name: "ai/needs-input"
+  color: "D93F0B"
+  description: "Human information or a decision is required."
+
+- name: "ai/failed"
+  color: "B60205"
+  description: "Unsuccessful terminal outcome with no automatic retry pending."
+
+- name: "ai/cancelled"
+  color: "6E7781"
+  description: "Confirmed cancellation."
+
+- name: "ai/completed"
+  color: "0E8A16"
+  description: "Successful automated work, independent of merge or issue closure."
