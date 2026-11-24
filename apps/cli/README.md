@@ -30,7 +30,8 @@ Run `factory --help` for the full command list. Common commands:
 - `factory daemon start|stop|restart|status|logs|run` — daemon lifecycle
 - `factory daemon run --mode listener [--port N]` — run webhook listener in the foreground
 - `factory runner` — run as a connected runner (receives job pushes)
-- `factory daemon run --mode listener` — run webhook listener (processes GitHub events and runner jobs)
+- `factory execution list|show|cancel|logs` — inspect and manage executions
+- `factory execution logs <id> [--follow] [--lines <n>]` — show logs for an execution
 - `factory agent harnesses [--json]` — list harnesses installed in T3 Code
 - `factory agent models <harness> [--json]` — list models of a harness
 
@@ -78,6 +79,26 @@ per 30 seconds before journald suppresses excess output. Journal retention stays
 under the system-wide journald policy. Inspect Factory logs with
 `journalctl --user -u factory --since today`; do not vacuum the shared journal
 to clean only Factory logs.
+
+### Execution logs
+
+`factory execution logs <id> [--follow] [--lines <n>]` shows captured stdout/stderr
+for a local execution record. Each execution writes to its own log file under the
+Factory state directory (`logs/<execution_id>.log`), so concurrent executions have
+distinguishable log streams.
+
+- `--lines <n>` limits the history shown (default: 200).
+- `--follow` emits subsequent records without repeating history. Interrupting
+  follow (Ctrl-C) stops the log stream and does not cancel the execution.
+- Unknown executions, unavailable logs, and empty logs return distinguishable
+  messages.
+
+Gateway-origin executions are covered when their logs were captured on the runner
+that executed them. Logs are not centrally replicated to the Gateway; remote
+availability is limited to runners/local machines that have the execution log
+files. Log retention is currently file-based and local: logs remain until removed
+by the operator or state directory cleanup. Credentials in captured output are
+redacted on a best-effort basis before being written to log files.
 
 ## More
 

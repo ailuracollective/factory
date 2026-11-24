@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 use crate::config::Config;
 use crate::execution;

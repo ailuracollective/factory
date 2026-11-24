@@ -980,3 +980,54 @@ pub fn execution_show(execution_id: &str, json: bool) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn execution_logs(execution_id: &str, follow: bool, lines: u32) -> Result<()> {
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let rec = match crate::execution::get_execution(execution_id)? {
+        Some(r) => r,
+        None => anyhow::bail!("execution not found: {execution_id}"),
+    };
+
+    let read = crate::execution::logs::read_log(&rec.execution_id, Some(lines))?;
+    match read.availability {
+        crate::execution::logs::LogAvailability::Unavailable => {
+            anyhow::bail!("logs unavailable for execution: {}", rec.execution_id);
+        }
+        crate::execution::logs::LogAvailability::Empty => {
+            if !follow {
+                println!("logs are empty for execution: {}", rec.execution_id);
+                return Ok(());
+            }
+            // Empty now but may receive output while following.
+        }
+        crate::execution::logs::LogAvailability::Available => {
+            let stdout = std::io::stdout();
+            let mut out = stdout.lock();
+            for line in &read.lines {
+                writeln!(out, "{line}")?;
+            }
+            out.flush()?;
+        }
+    }
+
+    if !follow {
+        return Ok(());
+    }
+
+    let interrupt = Arc::new(AtomicBool::new(false));
+    let interrupt_handler = interrupt.clone();
+    // Best-effort Ctrl-C handling: interrupt follow without cancelling the execution.
+    let _ = ctrlc::set_handler(move || {
+        interrupt_handler.store(true, Ordering::Relaxed);
+    });
+
+    let stdout = std::io::stdout();
+    let out = stdout.lock();
+    // Print already-emitted lines were handled above; follow from end of file
+    // so history is not repeated.
+    crate::execution::logs::follow_log_from_offset(&rec.execution_id, out, interrupt)?;
+    Ok(())
+}

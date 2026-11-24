@@ -1,7 +1,9 @@
 use super::process::{Signal, signal_owned_process};
 use super::*;
+use crate::execution::logs::ExecutionLogWriter;
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) struct CommandOutput {
@@ -23,6 +25,7 @@ pub(super) fn output_detail(stdout: &[u8], stderr: &[u8]) -> String {
 
 pub(super) const MAX_CAPTURED_OUTPUT: usize = 1024 * 1024;
 
+#[cfg(test)]
 pub(super) fn read_bounded_tail(reader: &mut impl Read, output: &mut Vec<u8>) {
     let mut chunk = [0; 8192];
     loop {
@@ -30,6 +33,31 @@ pub(super) fn read_bounded_tail(reader: &mut impl Read, output: &mut Vec<u8>) {
             Ok(0) | Err(_) => break,
             Ok(n) => {
                 output.extend_from_slice(&chunk[..n]);
+                if output.len() > MAX_CAPTURED_OUTPUT {
+                    let excess = output.len() - MAX_CAPTURED_OUTPUT;
+                    output.drain(..excess);
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn read_bounded_tail_with_optional_log(
+    reader: &mut impl Read,
+    output: &mut Vec<u8>,
+    log: Option<&Arc<ExecutionLogWriter>>,
+    stream: &str,
+) {
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let data = &chunk[..n];
+                if let Some(writer) = log {
+                    writer.write_chunk(stream, data);
+                }
+                output.extend_from_slice(data);
                 if output.len() > MAX_CAPTURED_OUTPUT {
                     let excess = output.len() - MAX_CAPTURED_OUTPUT;
                     output.drain(..excess);
@@ -58,17 +86,27 @@ pub(super) fn run_supervised_command(
         register_process(exec_id, child.clone(), pgid);
     }
 
+    let log_writer = execution_id.and_then(|id| match ExecutionLogWriter::open(id) {
+        Ok(w) => Some(Arc::new(w)),
+        Err(e) => {
+            tracing::warn!("failed to open execution log for {id}: {e}");
+            None
+        }
+    });
+
+    let stdout_log = log_writer.clone();
     let stdout_handle = std::thread::spawn(move || -> Vec<u8> {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stdout_pipe {
-            read_bounded_tail(&mut pipe, &mut buf);
+            read_bounded_tail_with_optional_log(&mut pipe, &mut buf, stdout_log.as_ref(), "stdout");
         }
         buf
     });
+    let stderr_log = log_writer;
     let stderr_handle = std::thread::spawn(move || -> Vec<u8> {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
-            read_bounded_tail(&mut pipe, &mut buf);
+            read_bounded_tail_with_optional_log(&mut pipe, &mut buf, stderr_log.as_ref(), "stderr");
         }
         buf
     });
