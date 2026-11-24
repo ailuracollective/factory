@@ -175,8 +175,9 @@ pub fn cancel(
         force,
         Some("factory cancel"),
     )?;
-    let _ = crate::agent::cancel_running_execution(&target, force);
-    let _ = crate::execution::append_audit(crate::execution::ExecutionAuditEvent {
+    crate::agent::cancel_running_execution(&target, force)
+        .map_err(|e| anyhow::anyhow!("failed to deliver cancellation to running execution: {e}"))?;
+    crate::execution::append_audit(crate::execution::ExecutionAuditEvent {
         ts: crate::state::now(),
         actor: format!("factory:{actor}"),
         action: if force {
@@ -187,7 +188,7 @@ pub fn cancel(
         target: target.clone(),
         outcome: rec.status.as_str().to_string(),
         detail: Some(rec.message.clone()),
-    });
+    })?;
     if json {
         use crate::interface::output::{OutputEnvelope, to_json};
         #[derive(serde::Serialize)]
@@ -238,16 +239,10 @@ fn resolve_cancel_target(
         {
             anyhow::bail!("execution {id} does not match issue #{issue}");
         }
-        if let Some(pr) = pr {
-            let pr_match = rec
-                .pr_url
-                .as_deref()
-                .map(|u| u.contains(&format!("/pull/{pr}")))
-                .unwrap_or(false)
-                || rec.issue_number == pr as i64;
-            if !pr_match {
-                anyhow::bail!("execution {id} does not match pr #{pr}");
-            }
+        if let Some(pr) = pr
+            && !pr_matches(Some(&rec.repo), rec.pr_url.as_deref(), pr)
+        {
+            anyhow::bail!("execution {id} does not match pr #{pr}");
         }
         return Ok(rec.execution_id);
     }
@@ -259,13 +254,7 @@ fn resolve_cancel_target(
     } else if let Some(pr) = pr {
         crate::execution::list_cancellable_for_repo(repo)?
             .into_iter()
-            .filter(|r| {
-                r.pr_url
-                    .as_deref()
-                    .map(|u| u.contains(&format!("/pull/{pr}")))
-                    .unwrap_or(false)
-                    || r.issue_number == pr as i64
-            })
+            .filter(|r| pr_matches(Some(repo), r.pr_url.as_deref(), pr))
             .collect()
     } else {
         anyhow::bail!("provide --issue or --pr with --repo");
@@ -291,6 +280,35 @@ fn resolve_cancel_target(
             anyhow::bail!("ambiguous cancel context; specify execution id:\n  - {ids}");
         }
     }
+}
+
+fn pr_matches(repo_constraint: Option<&str>, pr_url: Option<&str>, pr: u64) -> bool {
+    let Some(url) = pr_url else {
+        return false;
+    };
+    let url = url.trim().trim_end_matches('/');
+    let suffix = format!("/pull/{pr}");
+    if !url.ends_with(&suffix) {
+        return false;
+    }
+    let Some(rest) = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+    else {
+        return false;
+    };
+    let Some(repo_part) = rest.strip_suffix(&suffix) else {
+        return false;
+    };
+    if repo_part.is_empty() {
+        return false;
+    }
+    if let Some(repo) = repo_constraint
+        && !repo_part.eq_ignore_ascii_case(repo)
+    {
+        return false;
+    }
+    true
 }
 
 pub fn connect(gateway: &str, runner: &str, bootstrap_secret: Option<&str>) -> Result<()> {
