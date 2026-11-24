@@ -149,10 +149,11 @@ async fn webhook(
         );
     }
 
+    let log_ctx = webhook_log_context(&payload);
     let state_clone = state.clone();
     tokio::spawn(async move {
         let status = handle_payload(state_clone, event, payload).await;
-        tracing::info!("webhook result: {}", status);
+        tracing::info!("webhook result: {}{}", log_ctx, status);
     });
 
     (
@@ -255,6 +256,30 @@ fn is_allowed_ip(ip: IpAddr) -> bool {
             false
         }
         IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+fn webhook_log_context(payload: &Value) -> String {
+    let repo = payload
+        .get("repository")
+        .and_then(|r| r.get("full_name"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let number = payload
+        .get("issue")
+        .and_then(|i| i.get("number"))
+        .and_then(|v| v.as_i64())
+        .or_else(|| {
+            payload
+                .get("pull_request")
+                .and_then(|pr| pr.get("number"))
+                .and_then(|v| v.as_i64())
+        });
+    match (repo, number) {
+        (Some(r), Some(n)) => format!("repo={r} number={n} "),
+        (Some(r), None) => format!("repo={r} "),
+        (None, Some(n)) => format!("number={n} "),
+        (None, None) => String::new(),
     }
 }
 
