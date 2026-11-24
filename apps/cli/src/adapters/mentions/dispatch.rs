@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 #[derive(Clone)]
 pub struct AgentDispatcher {
@@ -85,7 +86,8 @@ impl Dispatcher for AgentDispatcher {
             "url": event.url,
             "labels": [],
         });
-        let mut prompt = build_mention_prompt(event, instruction, &issue, prompt_prior.as_ref());
+        let mut prompt =
+            build_mention_prompt(event, instruction, &issue, prompt_prior.as_ref(), &project);
         if event.is_pr {
             prompt.push_str(&format!(
                 "\nYou are commenting on existing PR {}. Continue on this PR's branch and do not create another PR. If a linked issue is available, update its state, but keep the PR as the review target.\n",
@@ -241,6 +243,7 @@ pub fn build_mention_prompt(
     instruction: &str,
     issue: &Value,
     prior: Option<&crate::state::IssueState>,
+    project: &Path,
 ) -> String {
     let same_thread = prior.and_then(|s| s.thread_id.as_ref()).is_some();
     let mut base = if same_thread {
@@ -256,7 +259,7 @@ pub fn build_mention_prompt(
                 .unwrap_or(&event.url)
         )
     } else {
-        crate::agent::build_prompt(issue)
+        crate::agent::build_prompt(issue, project)
     };
     if let Some(pr_url) = prior.and_then(|s| s.pr_url.as_deref()) {
         base.push_str(&format!(
