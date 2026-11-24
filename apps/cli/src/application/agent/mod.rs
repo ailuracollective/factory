@@ -38,7 +38,7 @@ pub fn build_prompt(issue: &Value) -> String {
         .unwrap_or("")
         .trim();
     format!(
-        "Resolve GitHub issue #{number}: {url}\n\n## Task\nRead the issue with `gh issue view {number}` and inspect the relevant code before making changes. Work in the provided worktree/branch, implement the requested change, and add or update focused tests.\n\n## Verify\nRun the checks relevant to the change, then the project's required tests, linters, and build. Fix failures caused by the change and rerun them. Never skip, disable, or weaken tests. Report any unrelated or externally blocked checks accurately.\n\n## Pull request\nPush the branch and create a PR with `gh pr create`. Include a concise summary, actual check results, and `Closes #{number}` in its description. Inspect PR checks with `gh pr checks` (and `gh run view` for failures); fix change-related failures and push updates. If checks are externally blocked, report the blocker and PR URL without claiming success. If PR creation fails, report the exact error and do not claim completion. Do not merge the PR.\n",
+        "Resolve GitHub issue #{number}: {url}\n\n## Task\nRead the issue with `gh issue view {number}` and inspect the relevant code before making changes. Work in the provided worktree/branch, implement the requested change, and add or update focused tests.\n\n## Verify\nRun the checks relevant to the change, then the project's required tests, linters, and build. Fix failures caused by the change and rerun them. Never skip, disable, or weaken tests. Report any unrelated or externally blocked checks accurately.\n\n## Pull request\nPush the branch and create a PR with `gh pr create`. Include a concise summary, actual check results, and `Closes #{number}` in its description. After opening the PR, inspect PR checks with `gh pr checks` (and `gh run view` for failures) and do not finish the task while any required check is pending or failing. Fix change-related failures, push updates, and re-check until required checks complete. If checks are externally blocked, report the blocker and PR URL without claiming success. If PR creation fails, report the exact error and do not claim completion. Do not merge the PR.\n",
         number = number,
         url = url
     )
@@ -260,6 +260,7 @@ mod tests {
         assert!(p.contains("Closes #7"));
         assert!(p.contains("relevant code"));
         assert!(p.contains("Do not merge"));
+        assert!(p.contains("pending or failing"));
     }
 
     #[test]
