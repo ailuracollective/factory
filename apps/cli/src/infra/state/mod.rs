@@ -101,6 +101,26 @@ mod pull_request_store {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+mod execution_label_state_store {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "execution_label_state")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub repo_key: String,
+        pub installed_prefix: Option<String>,
+        pub active_prefix: Option<String>,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+use execution_label_state_store::Entity as ExecutionLabelStateEntity;
 use issue_store::{ActiveModel as IssueActiveModel, Entity as IssueEntity};
 use mention_event_store::{
     ActiveModel as MentionEventActiveModel, Column as MentionEventColumn,
@@ -238,6 +258,7 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
         schema.create_table_from_entity(IssueEntity),
         schema.create_table_from_entity(MentionEventEntity),
         schema.create_table_from_entity(PullRequestEntity),
+        schema.create_table_from_entity(ExecutionLabelStateEntity),
     ] {
         let mut stmt = stmt;
         stmt.if_not_exists();
@@ -260,11 +281,18 @@ async fn connect(path: &std::path::Path) -> Result<DatabaseConnection> {
     Ok(db)
 }
 
+mod execution_label_state;
 mod issues;
 mod mentions_store;
 mod projects;
 
-pub use issues::{issue_state, issue_state_by_pr_url, load_state, save_state, update_issue_state};
+pub use execution_label_state::{
+    ExecutionLabelState, get_execution_label_state, set_execution_label_state,
+};
+pub use issues::{
+    has_active_executions_for_repo, issue_state, issue_state_by_pr_url, load_state, save_state,
+    update_issue_state,
+};
 pub use mentions_store::{count_mention_launches_since, mention_event_seen, record_mention_event};
 pub use projects::{load_projects, sync_projects};
 pub use pull_requests::{link_pull_request, linked_pull_requests, pull_request_for_event};

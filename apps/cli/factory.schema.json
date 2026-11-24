@@ -29,6 +29,18 @@
         "daily_quota": { "type": "integer", "minimum": 0 },
         "report": { "type": "boolean" }
       }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Namespace prefix for the eight Factory execution label states. Defaults to \"ai/\". Must be a single lowercase ASCII namespace followed by '/'.",
+          "default": "ai/",
+          "pattern": "^[a-z0-9_-]+/$"
+        }
+      }
     }
   }
 }

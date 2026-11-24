@@ -106,3 +106,11 @@ pub fn issue_state_by_pr_url(pr_url: &str) -> Option<(String, IssueState)> {
         .into_iter()
         .find(|(_, rec)| rec.pr_url.as_deref() == Some(pr_url))
 }
+
+pub fn has_active_executions_for_repo(repo_key: &str) -> bool {
+    let prefix = format!("{repo_key}#");
+    load_state().into_iter().any(|(key, rec)| {
+        key.starts_with(&prefix)
+            && matches!(rec.status, IssueStatus::Pending | IssueStatus::Running)
+    })
+}

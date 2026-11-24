@@ -1,6 +1,6 @@
 use crate::config::{
-    Defaults, FactoryRepoConfig, MentionsConfig, get_repo, load_config, load_factory_config,
-    save_config,
+    Defaults, FactoryRepoConfig, LabelsConfig, MentionsConfig, get_repo, load_config,
+    load_factory_config, save_config, validate_factory_repo_config,
 };
 use crate::repo_manager::{add_repo, list_repos, remove_repo, sync_labels};
 use crate::webhook_manager::create_webhook;
@@ -42,6 +42,7 @@ pub fn init(force: bool, local: bool) -> Result<()> {
                 max_attempts: 3,
             }),
             mentions: Some(MentionsConfig::default()),
+            labels: None,
         };
         std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
         println!("Created {}", path.display());
@@ -986,8 +987,14 @@ fn available_harnesses() -> String {
 
 pub fn config_get(json: bool) -> Result<()> {
     let mut cfg = load_config()?;
+    let mut labels_prefix = crate::infra::execution_labels::DEFAULT_PREFIX.to_string();
     // Apply repo-level factory.json if present in cwd or an ancestor.
-    if let Some(repo_cfg) = find_factory_config() {
+    if let Some(repo_cfg) = find_factory_config()? {
+        if let Some(labels) = repo_cfg.labels
+            && !labels.prefix.is_empty()
+        {
+            labels_prefix = labels.prefix;
+        }
         if let Some(d) = repo_cfg.defaults {
             if !d.harness.is_empty() {
                 cfg.defaults.harness = d.harness;
@@ -1044,6 +1051,7 @@ pub fn config_get(json: bool) -> Result<()> {
             mentions_command: String,
             mentions_daily_quota: u32,
             mentions_report: bool,
+            labels_prefix: String,
             webhook_port: u16,
             webhook_bind: String,
         }
@@ -1059,6 +1067,7 @@ pub fn config_get(json: bool) -> Result<()> {
             mentions_command: cfg.mentions.command.clone(),
             mentions_daily_quota: cfg.mentions.daily_quota,
             mentions_report: cfg.mentions.report,
+            labels_prefix,
             webhook_port: cfg.webhook.port,
             webhook_bind: cfg.webhook.bind.clone(),
         };
@@ -1084,22 +1093,25 @@ pub fn config_get(json: bool) -> Result<()> {
     println!("mentions.command: {}", cfg.mentions.command);
     println!("mentions.daily_quota: {}", cfg.mentions.daily_quota);
     println!("mentions.report: {}", cfg.mentions.report);
+    println!("labels.prefix: {}", labels_prefix);
     println!("webhook.port: {}", cfg.webhook.port);
     println!("webhook.bind: {}", cfg.webhook.bind);
     Ok(())
 }
 
-fn find_factory_config() -> Option<FactoryRepoConfig> {
-    let mut dir = std::env::current_dir().ok()?;
+fn find_factory_config() -> Result<Option<FactoryRepoConfig>> {
+    let mut dir = std::env::current_dir()?;
     loop {
-        if let Some(cfg) = load_factory_config(&dir) {
-            return Some(cfg);
-        }
-        if !dir.pop() {
-            break;
+        match load_factory_config(&dir)? {
+            Some(cfg) => return Ok(Some(cfg)),
+            None => {
+                if !dir.pop() {
+                    break;
+                }
+            }
         }
     }
-    None
+    Ok(None)
 }
 
 pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
@@ -1108,8 +1120,11 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
             .unwrap_or_default()
             .join("factory.json");
         let mut fc: FactoryRepoConfig = if path.exists() {
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default())
-                .unwrap_or_default()
+            let data = std::fs::read_to_string(&path)?;
+            let cfg: FactoryRepoConfig = serde_json::from_str(&data)
+                .map_err(|e| anyhow::anyhow!("invalid factory.json at {}: {e}", path.display()))?;
+            validate_factory_repo_config(&cfg)?;
+            cfg
         } else {
             FactoryRepoConfig::default()
         };
@@ -1125,33 +1140,33 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
         if fc.mentions.is_none() {
             fc.mentions = Some(MentionsConfig::default());
         }
-        let d = fc.defaults.as_mut().unwrap();
-        let m = fc.mentions.as_mut().unwrap();
         match key {
-            "harness" => d.harness = value.to_string(),
-            "model" => d.model = value.to_string(),
-            "base_branch" => d.base_branch = value.to_string(),
-            "label" => d.label = value.to_string(),
+            "harness" => fc.defaults.as_mut().unwrap().harness = value.to_string(),
+            "model" => fc.defaults.as_mut().unwrap().model = value.to_string(),
+            "base_branch" => fc.defaults.as_mut().unwrap().base_branch = value.to_string(),
+            "label" => fc.defaults.as_mut().unwrap().label = value.to_string(),
             "max_attempts" => {
                 if let Ok(n) = value.parse() {
-                    d.max_attempts = n;
+                    fc.defaults.as_mut().unwrap().max_attempts = n;
                 } else {
                     println!("Invalid number: {}", value);
                     return Ok(());
                 }
             }
-            "mentions.enabled" => m.enabled = value == "true" || value == "1",
+            "mentions.enabled" => {
+                fc.mentions.as_mut().unwrap().enabled = value == "true" || value == "1"
+            }
             "mentions.usernames" => {
-                m.usernames = value
+                fc.mentions.as_mut().unwrap().usernames = value
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(String::from)
                     .collect();
             }
-            "mentions.command" => m.command = value.to_string(),
+            "mentions.command" => fc.mentions.as_mut().unwrap().command = value.to_string(),
             "mentions.allowed_authors" => {
-                m.allowed_authors = value
+                fc.mentions.as_mut().unwrap().allowed_authors = value
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
@@ -1160,26 +1175,35 @@ pub fn config_set(key: &str, value: &str, global: bool) -> Result<()> {
             }
             "mentions.daily_quota" => {
                 if let Ok(n) = value.parse() {
-                    m.daily_quota = n;
+                    fc.mentions.as_mut().unwrap().daily_quota = n;
                 } else {
                     println!("Invalid number: {}", value);
                     return Ok(());
                 }
             }
-            "mentions.report" => m.report = value == "true" || value == "1",
+            "mentions.report" => {
+                fc.mentions.as_mut().unwrap().report = value == "true" || value == "1"
+            }
             "mentions.usernames_extra" => {
-                m.usernames_extra = value
+                fc.mentions.as_mut().unwrap().usernames_extra = value
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(String::from)
                     .collect();
             }
+            "labels.prefix" => {
+                let labels = fc.labels.get_or_insert_with(|| LabelsConfig {
+                    prefix: crate::infra::execution_labels::DEFAULT_PREFIX.to_string(),
+                });
+                labels.prefix = value.to_string();
+            }
             _ => {
                 println!("Unknown key.");
                 return Ok(());
             }
         }
+        validate_factory_repo_config(&fc)?;
         std::fs::write(&path, serde_json::to_string_pretty(&fc)?)?;
         println!("Set {} = {} (local)", key, value);
         return Ok(());

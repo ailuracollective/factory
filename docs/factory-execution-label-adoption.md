@@ -35,7 +35,7 @@ Constraints for adopters:
 
 ## Definitions
 
-- **Factory execution catalog (canonical):** exactly the eight labels listed in `factory-execution-label-standard.md` at the pinned revision (`ai/queued`, `ai/processing`, `ai/waiting`, `ai/blocked`, `ai/needs-input`, `ai/failed`, `ai/cancelled`, `ai/completed`) with canonical names, colors, and descriptions.
+- **Factory execution catalog (canonical):** exactly the eight labels listed in `factory-execution-label-standard.md` at the pinned revision. With the default `ai/` prefix they are `ai/queued`, `ai/processing`, `ai/waiting`, `ai/blocked`, `ai/needs-input`, `ai/failed`, `ai/cancelled`, `ai/completed`; if `factory.json` sets `labels.prefix`, resolve the same eight state identifiers under that prefix.
 - **Catalog entry:** one label object `{ name, color, description }` as defined in the canonical manifest.
 - **Remote inventory:** the complete, paginated set of labels currently present on the target GitHub repository (via API), retrieved before any mutation.
 
@@ -65,13 +65,15 @@ When adding catalog labels to a target that tracks a local manifest (for example
 
 1. **Fetch a complete paginated remote inventory.** List all labels on the target repository using paginated API calls until every page is retrieved. Do not assume the first page is complete.
 2. **Normalize names case-insensitively** for comparison (`ai/Queued` and `ai/queued` are the same logical name to GitHub).
-3. **Classify each catalog name** against the remote inventory:
+3. **Resolve the effective catalog.** Read `labels.prefix` from the target repository `factory.json` (default `ai/`). Resolve the eight canonical state identifiers into effective label names with that prefix and validate the prefix before mutation.
+4. **Classify each catalog name** against the remote inventory:
    - **Missing:** no remote label matches case-insensitively → candidate to create.
    - **Exact match (case-insensitively):** remote label exists with the same canonical name → candidate to update only if `color` or `description` differs from the pinned catalog (normalize color format as stored by GitHub: typically lowercase hex without a leading `#` in API responses; compare by the canonical six-digit hex value from the manifest).
-   - **Collision / conflict:** an existing remote label that is **not** one of the eight canonical catalog names but would be problematic? The catalog owns only its exact names. However:
-     - If any remote label’s case-insensitive name equals a canonical catalog name but differs in an unexpected way you cannot reconcile safely, treat it as a **conflict requiring explicit resolution** before mutation.
-     - If other `ai/*` labels exist that are **not** in the catalog (e.g. `ai/custom-thing`), they are **outside catalog ownership**. **Preserve them.** Do not rename, delete, or repurpose them.
-4. **Incompatible existing labels:** if a remote label has the same case-insensitive name as a canonical catalog label but you must not change it (policy, ownership, or explicit human direction), you must obtain **explicit authorization** to proceed with a different resolution (rename-away is rarely appropriate; usually the safe resolution is to **not** apply that catalog label and to report the conflict). Do not silently overwrite.
+   - **Collision / conflict:** an existing remote label that is **not** one of the eight resolved catalog names but would be problematic? The catalog owns only its exact resolved names. However:
+     - If any remote label’s case-insensitive name equals a resolved catalog name but differs in an unexpected way you cannot reconcile safely, treat it as a **conflict requiring explicit resolution** before mutation.
+     - If other labels exist under the configured prefix namespace that are **not** in the resolved catalog (e.g. `ai/custom-thing` when using `ai/`), they are **outside catalog ownership**. **Preserve them.** Do not rename, delete, or repurpose them.
+5. **Incompatible existing labels:** if a remote label has the same case-insensitive name as a resolved catalog label but you must not change it (policy, ownership, or explicit human direction), you must obtain **explicit authorization** to proceed with a different resolution (rename-away is rarely appropriate; usually the safe resolution is to **not** apply that catalog label and to report the conflict). Do not silently overwrite.
+6. **Prefix changes require explicit migration.** If the configured prefix differs from an installed catalog or active execution, do not silently apply the new prefix; require an explicit migration.
 
 **Separate authorization for remote mutations:** any operation that creates, updates, or deletes labels on the remote repository is a **remote mutation** and requires **separate explicit authorization** from a human maintainer (or an explicitly granted automation policy) before execution. Planning and local file edits do not require this authorization; performing GitHub API/CLI label writes does. If authorization is not granted, stop after documenting the planned changes and conflicts.
 
@@ -83,7 +85,7 @@ When authorized to mutate remotes:
 - For each canonical catalog label:
   - **Create** if missing (using canonical `name`, `color`, `description` from the pinned manifest).
   - **Update** only the remote label’s color and/or description to match the pinned catalog when they differ. Do **not** change the label name casing arbitrarily except to the canonical form only if the platform requires normalization and the logical name is identical; prefer leaving the existing canonical-name label in place and aligning color/description.
-- **Preserve unrelated labels**, including all other `ai/*` names not in the catalog.
+- **Preserve unrelated labels**, including all other labels in the configured prefix namespace that are not in the resolved catalog.
 - **No wildcard deletion.** Never delete labels except as part of an explicitly authorized, documented **non-destructive removal** workflow (see below), and never via a wildcard “sync/delete all not in list” operation.
 - **No silent overwrite.** If a needed change conflicts with policy or an unresolved collision, do not apply it silently; report and stop or request explicit resolution.
 
@@ -124,7 +126,7 @@ When moving from an older pinned Factory revision to a newer one:
 Removing the catalog from a target is **optional** and must be **non-destructive** to unrelated data:
 
 - Only remove or revert **Factory catalog labels** that the adoption introduced or that you are explicitly authorized to change.
-- **Never** delete unrelated labels, including other `ai/*` labels not in the catalog.
+- **Never** delete unrelated labels, including other labels in the configured prefix namespace that are not in the resolved catalog.
 - Prefer **leaving labels in place but unused** if removal risk is unclear. If removal is authorized, document each label action (delete vs. revert color/description) and obtain separate authorization for remote mutations.
 - This does not delete issues, close workflows, or rewrite Git history except normal branch/PR operations.
 
