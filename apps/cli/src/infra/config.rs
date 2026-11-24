@@ -202,18 +202,75 @@ fn sync_projects_to_db(repos: &[RepoEntry]) {
     crate::state::sync_projects(repos);
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LabelsConfig {
+    #[serde(default = "default_labels_prefix")]
+    pub prefix: String,
+}
+
+fn default_labels_prefix() -> String {
+    crate::infra::execution_labels::DEFAULT_PREFIX.to_string()
+}
+
+impl LabelsConfig {
+    pub fn normalized_prefix(&self) -> &str {
+        self.prefix.as_str()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FactoryRepoConfig {
     #[serde(default)]
     pub defaults: Option<Defaults>,
     #[serde(default)]
     pub mentions: Option<MentionsConfig>,
+    #[serde(default)]
+    pub labels: Option<LabelsConfig>,
 }
 
-pub fn load_factory_config(repo_path: &std::path::Path) -> Option<FactoryRepoConfig> {
+pub fn load_factory_config(repo_path: &std::path::Path) -> Result<Option<FactoryRepoConfig>> {
     let path = repo_path.join("factory.json");
-    let data = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&data).ok()
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = std::fs::read_to_string(&path)?;
+    let cfg: FactoryRepoConfig = serde_json::from_str(&data)
+        .map_err(|e| anyhow::anyhow!("invalid factory.json at {}: {e}", path.display()))?;
+    validate_factory_repo_config(&cfg)?;
+    Ok(Some(cfg))
+}
+
+pub fn validate_factory_repo_config(cfg: &FactoryRepoConfig) -> Result<()> {
+    if let Some(labels) = &cfg.labels {
+        crate::infra::execution_labels::validate_prefix(&labels.prefix)?;
+        // Ensure the full catalog resolves (length limits, etc.).
+        crate::infra::execution_labels::resolve_catalog(&labels.prefix)?;
+    }
+    Ok(())
+}
+
+pub fn configured_execution_prefix(cfg: &FactoryRepoConfig) -> &str {
+    cfg.labels
+        .as_ref()
+        .map(|l| l.prefix.as_str())
+        .filter(|p| !p.is_empty())
+        .unwrap_or(crate::infra::execution_labels::DEFAULT_PREFIX)
+}
+
+pub fn ensure_execution_labels_ready(
+    repo_key: &str,
+    cfg: &FactoryRepoConfig,
+) -> Result<crate::infra::execution_labels::ResolvedCatalog> {
+    let configured = configured_execution_prefix(cfg);
+    let catalog = crate::infra::execution_labels::resolve_catalog(configured)?;
+    let state = crate::infra::state::get_execution_label_state(repo_key);
+    let has_active = crate::infra::state::has_active_executions_for_repo(repo_key);
+    crate::infra::execution_labels::validate_prefix_consistency(
+        configured,
+        state.installed_prefix.as_deref(),
+        has_active,
+    )?;
+    Ok(catalog)
 }
 
 pub fn get_repo<'a>(config: &'a Config, name: &str) -> Option<&'a RepoEntry> {
@@ -266,8 +323,77 @@ mod tests {
             r#"{"defaults":{"harness":"opencode","model":"m","base_branch":"develop","label":"ready","max_attempts":5}}"#,
         )
         .unwrap();
-        let cfg = load_factory_config(&dir).unwrap();
+        let cfg = load_factory_config(&dir).unwrap().unwrap();
         assert_eq!(cfg.defaults.unwrap().base_branch, "develop");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repo_config_defaults_labels_prefix_to_ai() {
+        let cfg: FactoryRepoConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(cfg.labels.is_none());
+        assert_eq!(
+            configured_execution_prefix(&cfg),
+            crate::infra::execution_labels::DEFAULT_PREFIX
+        );
+        let catalog =
+            crate::infra::execution_labels::resolve_catalog(configured_execution_prefix(&cfg))
+                .unwrap();
+        assert_eq!(catalog.names()[0], "ai/queued");
+    }
+
+    #[test]
+    fn repo_config_custom_prefix_resolves() {
+        let cfg: FactoryRepoConfig =
+            serde_json::from_str(r#"{"labels":{"prefix":"factory/"}}"#).unwrap();
+        let prefix = configured_execution_prefix(&cfg);
+        assert_eq!(prefix, "factory/");
+        let catalog = crate::infra::execution_labels::resolve_catalog(prefix).unwrap();
+        assert_eq!(catalog.names()[0], "factory/queued");
+        assert_eq!(catalog.names().len(), 8);
+    }
+
+    #[test]
+    fn repo_config_invalid_prefix_rejected_on_load() {
+        let dir = std::env::temp_dir().join("factory_repo_cfg_invalid_prefix");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("factory.json"), r#"{"labels":{"prefix":"AI/"}}"#).unwrap();
+        let err = load_factory_config(&dir).unwrap_err().to_string();
+        assert!(
+            err.contains("labels.prefix") || err.contains("lowercase"),
+            "{err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repo_config_invalid_json_rejected_on_load() {
+        let dir = std::env::temp_dir().join("factory_repo_cfg_invalid_json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("factory.json"), "{not json").unwrap();
+        let err = load_factory_config(&dir).unwrap_err().to_string();
+        assert!(err.contains("invalid factory.json"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn independent_repo_resolution_from_configs() {
+        let a: FactoryRepoConfig = serde_json::from_str(r#"{"labels":{"prefix":"ai/"}}"#).unwrap();
+        let b: FactoryRepoConfig =
+            serde_json::from_str(r#"{"labels":{"prefix":"factory/"}}"#).unwrap();
+        let ca = crate::infra::execution_labels::resolve_catalog(configured_execution_prefix(&a))
+            .unwrap();
+        let cb = crate::infra::execution_labels::resolve_catalog(configured_execution_prefix(&b))
+            .unwrap();
+        assert_eq!(
+            ca.label_for(crate::infra::execution_labels::ExecutionState::Queued)
+                .name,
+            "ai/queued"
+        );
+        assert_eq!(
+            cb.label_for(crate::infra::execution_labels::ExecutionState::Queued)
+                .name,
+            "factory/queued"
+        );
     }
 }

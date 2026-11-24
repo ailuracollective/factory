@@ -1,6 +1,6 @@
 # Factory execution label standard
 
-Version: `1.0.0`
+Version: `1.1.0`
 
 This document defines the canonical Factory execution label catalog: a
 distributable, versionable set of GitHub issue labels that represent observed
@@ -9,7 +9,8 @@ organization-wide label taxonomy.
 
 The canonical manifest is
 [`.github/labels.factory-execution.yml`](../.github/labels.factory-execution.yml).
-The manifest and this document must agree.
+The manifest and this document must agree. The manifest declares the default
+`ai/` names; repositories may configure a different prefix as described below.
 
 ## Catalog
 
@@ -49,6 +50,46 @@ description is GitHub-compatible English of at most 100 characters.
   means automated work completed successfully. It does not imply that a pull
   request merged, that an issue closed, or that human review is complete.
 
+## Prefix configuration
+
+Repositories may configure the execution label namespace prefix in
+`factory.json`:
+
+```json
+{
+  "labels": {
+    "prefix": "factory/"
+  }
+}
+```
+
+- **Default.** Omitting `labels.prefix` resolves the existing `ai/*` catalog.
+- **Format.** The prefix must be a single lowercase ASCII namespace followed by
+  `/`. Valid characters in the namespace are lowercase letters, digits, `-`, and
+  `_`. Empty values, invalid characters, nested namespaces, and effective names
+  exceeding GitHub's 50-character label limit are rejected.
+- **Reserved families.** Reserved families of applicable repository standards
+  cannot be selected. Organization core families (`type/`, `status/`, `scope/`,
+  `meta/`, `github_actions/`, `release/`) are protected in Standards adopters,
+  including `complexity/` when adopted.
+- **State identifiers.** State identifiers (`queued`, `processing`, `waiting`,
+  `blocked`, `needs-input`, `failed`, `cancelled`, `completed`) are independent
+  of label names. No per-state renaming or automatic alternative-prefix
+  selection is introduced.
+- **Resolution.** The eight canonical state identifiers resolve into effective
+  label names using the configured prefix. Setting `factory/` resolves the same
+  eight states under `factory/*` without changing colors or meanings.
+- **Ownership.** Ownership is limited to the eight resolved names.
+  Case-insensitive collisions with existing incompatible labels are reported
+  rather than silently overwritten.
+- **Independence.** Different repositories can resolve different prefixes
+  independently.
+- **Consistency.** Inconsistent effective configuration between components is
+  detectable before label mutation.
+- **Active configuration.** Invalid configuration is rejected without replacing
+  the last valid active configuration. A prefix change is not silently applied
+  to an installed catalog or active execution; explicit migration is required.
+
 ## Contract
 
 - **Single state.** At most one catalog state applies to an issue at a time.
@@ -58,14 +99,15 @@ description is GitHub-compatible English of at most 100 characters.
 - **Observational, not authoritative.** Labels are observational projections,
   not commands and not authoritative execution state. Manual label changes do
   not authorize execution transitions.
-- **Exact ownership.** Factory owns only the exact catalog names listed in this
-  standard. Unrelated `ai/*` labels are not reserved and are not managed by this
-  catalog.
+- **Exact ownership.** Factory owns only the exact resolved catalog names for the
+  configured prefix. Unrelated labels under the same prefix namespace are not
+  reserved and are not managed by this catalog.
 - **Case-insensitive collisions.** GitHub label names are case-insensitive.
   Repositories must not define labels whose case-insensitive form collides with a
-  catalog name. A collision with an exact catalog name is owned by the catalog;
-  a collision with a different `ai/*` name is outside catalog ownership but can
-  create ambiguous operator or automation behavior and should be avoided.
+  resolved catalog name. A collision with an exact resolved catalog name is owned
+  by the catalog; a collision with a different name in the same namespace is
+  outside catalog ownership but can create ambiguous operator or automation
+  behavior and should be avoided.
 
 ## Compatibility and use
 

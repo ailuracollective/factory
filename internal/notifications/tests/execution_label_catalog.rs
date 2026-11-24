@@ -123,14 +123,24 @@ fn factory_execution_label_manifest_matches_catalog() {
         "at most one catalog state applies to an issue",
         "no published automation state",
         "initial contract applies to github issues, not linked pull requests",
-        "unrelated `ai/*` labels are not reserved and are not managed",
+        "unrelated labels under the same prefix namespace are not reserved and are not managed",
         "case-insensitive collisions",
         "level-1 extensions",
         "can also be used independently by external repositories",
         "versioning",
         "non-destructive",
         "manifest and this document must agree",
-        "version: `1.0.0`",
+        "version: `1.1.0`",
+        "labels.prefix",
+        "omitting `labels.prefix` resolves the existing `ai/*` catalog",
+        "single lowercase ascii namespace followed by `/`",
+        "reserved families of applicable repository standards cannot be selected",
+        "state identifiers",
+        "independent of label names",
+        "ownership is limited to the eight resolved names",
+        "inconsistent effective configuration between components is detectable before label mutation",
+        "invalid configuration is rejected without replacing the last valid active configuration",
+        "explicit migration is required",
     ] {
         assert!(
             normalized_doc_lower.contains(required),
@@ -138,7 +148,7 @@ fn factory_execution_label_manifest_matches_catalog() {
         );
     }
     assert!(
-        manifest.contains("Version: 1.0.0"),
+        manifest.contains("Version: 1.1.0"),
         "manifest must declare version"
     );
 }
