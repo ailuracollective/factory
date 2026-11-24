@@ -52,6 +52,7 @@ fn factory_execution_label_manifest_matches_catalog() {
 
     let entries = parse_manifest(&manifest_path);
     let expected = vec![
+        ("ai", "0E8A16", "Trigger AI factory agent"),
         (
             "ai/queued",
             "CFD3D7",
@@ -88,7 +89,7 @@ fn factory_execution_label_manifest_matches_catalog() {
     assert_eq!(
         entries.len(),
         expected.len(),
-        "catalog must contain exactly eight labels"
+        "catalog must contain exactly nine labels"
     );
     for (entry, exp) in entries.iter().zip(expected.iter()) {
         assert_eq!(entry.0, exp.0);
